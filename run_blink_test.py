@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.pipelines.face_pipeline import FacePipeline
 from src.signals.blink_detector import BlinkDetector
 from src.signals.eye_metrics import extract_eye_measurements
+from src.utils.camera import print_camera_candidates
 from src.utils.overlay import (
     draw_bounding_box,
     draw_eye_metrics,
@@ -73,6 +74,7 @@ def run(cfg: dict, debug: bool) -> None:
 
     log = logging.getLogger(__name__)
 
+    print_camera_candidates(capture_cfg)
     detector = BlinkDetector(signals_cfg)
 
     # Rolling FPS window
@@ -178,9 +180,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Live blink detection — Day 3")
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "--device", type=int, default=None,
+        metavar="N",
+        help="Camera device index (overrides capture.device_id in config)",
+    )
+    parser.add_argument(
+        "--backend", default=None,
+        metavar="NAME",
+        help="Camera backend: avfoundation | any | qt | dshow | v4l2 "
+             "(overrides capture.backend in config)",
+    )
     args = parser.parse_args()
 
     cfg = _load_config(args.config)
+    if args.device is not None:
+        cfg.setdefault("capture", {})["device_id"] = args.device
+    if args.backend is not None:
+        cfg.setdefault("capture", {})["backend"] = args.backend
+
     _setup_logging(cfg.get("logging", {}), args.debug)
 
     run(cfg, debug=args.debug)

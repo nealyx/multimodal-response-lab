@@ -30,12 +30,22 @@ paths:
 
 # ── Webcam capture ────────────────────────────────────────────────────────────
 capture:
-  device_id: 0             # OS camera index (0 = first/built-in)
+  # device_id: OS camera index.  0 = first camera enumerated by AVFoundation.
+  # If macOS Continuity Camera is enabled, the iPhone may claim index 0 and
+  # push the built-in FaceTime HD Camera to index 1.  Run any script once to
+  # see the candidate list, then set this to the correct index or use --device N.
+  device_id: 0
+
   fps: 30
   resolution: [640, 480]
-  # backend: "auto" tries CAP_AVFOUNDATION → CAP_ANY → CAP_QT in order.
-  # Set explicitly to force a specific backend for debugging.
+
+  # backend: camera backend used by OpenCV.
+  # "auto" tries CAP_AVFOUNDATION → CAP_ANY → CAP_QT in order.
+  # Set to "avfoundation" to force the macOS native backend; this avoids
+  # GStreamer/Qt being picked up when those libraries are present.
+  # Override at runtime with --backend NAME without editing this file.
   backend: auto            # auto | avfoundation | any | qt | v4l2 | dshow
+
   flip_horizontal: true    # mirror mode — natural for a selfie-camera view
   # Camera warm-up: discard leading blank frames that AVFoundation emits while
   # the sensor initialises.  Increase warmup_frames if a slow USB camera still

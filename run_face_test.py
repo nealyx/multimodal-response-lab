@@ -39,6 +39,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.pipelines.face_pipeline import FacePipeline
+from src.utils.camera import print_camera_candidates
 from src.utils.overlay import (
     draw_bounding_box,
     draw_face_mesh,
@@ -64,6 +65,8 @@ def run(cfg: dict, debug: bool, debug_vision: bool) -> None:
     face_cfg    = cfg.get("face_mesh", {})
     capture_cfg = cfg.get("capture", {})
     overlay_cfg = cfg.get("overlay", {})
+
+    print_camera_candidates(capture_cfg)
 
     log = logging.getLogger(__name__)
 
@@ -138,18 +141,28 @@ def run(cfg: dict, debug: bool, debug_vision: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Face mesh visualiser / Day 2 test")
+    parser.add_argument("--config", default="configs/default.yaml")
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--debug-vision", action="store_true")
     parser.add_argument(
-        "--config", default="configs/default.yaml",
-        help="Path to YAML config (default: configs/default.yaml)",
+        "--device", type=int, default=None,
+        metavar="N",
+        help="Camera device index (overrides capture.device_id in config)",
     )
-    parser.add_argument("--debug", action="store_true", help="Enable DEBUG logging")
     parser.add_argument(
-        "--debug-vision", action="store_true",
-        help="Log frame properties + dump first 3 BGR/RGB frames to outputs/debug_frames/",
+        "--backend", default=None,
+        metavar="NAME",
+        help="Camera backend: avfoundation | any | qt | dshow | v4l2 "
+             "(overrides capture.backend in config)",
     )
     args = parser.parse_args()
 
     cfg = _load_config(args.config)
+    if args.device is not None:
+        cfg.setdefault("capture", {})["device_id"] = args.device
+    if args.backend is not None:
+        cfg.setdefault("capture", {})["backend"] = args.backend
+
     _setup_logging(cfg.get("logging", {}), args.debug or args.debug_vision)
 
     run(cfg, debug=args.debug, debug_vision=args.debug_vision)
