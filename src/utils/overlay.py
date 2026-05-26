@@ -261,6 +261,85 @@ def _openness_bar(
     cv2.rectangle(img, (x, y), (x + width, y + height), (120, 120, 120), 1)
 
 
+def draw_head_axes(
+    frame:         "np.ndarray",
+    rvec:          "np.ndarray",
+    tvec:          "np.ndarray",
+    camera_matrix: "np.ndarray",
+    *,
+    axis_length:   float = 50.0,
+    dist_coeffs:   "Optional[np.ndarray]" = None,
+) -> "np.ndarray":
+    """Draw 3-D coordinate axes projected onto the face (X=red, Y=green, Z=blue).
+
+    The axes originate at the nose tip (the solvePnP model origin).
+    axis_length is in the same units as the 3-D face model (≈ mm).
+    """
+    import numpy as np  # already imported at module level; local alias for clarity
+
+    canvas = frame.copy()
+    if dist_coeffs is None:
+        dist_coeffs = np.zeros((4, 1), dtype=np.float64)
+
+    origin_3d = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
+    x_end_3d  = np.array([[axis_length, 0.0,          0.0]], dtype=np.float64)
+    y_end_3d  = np.array([[0.0,         axis_length,   0.0]], dtype=np.float64)
+    z_end_3d  = np.array([[0.0,         0.0,  -axis_length]], dtype=np.float64)
+
+    pts, _  = cv2.projectPoints(
+        np.vstack([origin_3d, x_end_3d, y_end_3d, z_end_3d]),
+        rvec, tvec, camera_matrix, dist_coeffs,
+    )
+    pts = pts.reshape(-1, 2).astype(int)
+    o, px, py, pz = tuple(pts[0]), tuple(pts[1]), tuple(pts[2]), tuple(pts[3])
+
+    cv2.arrowedLine(canvas, o, px, (0,   0, 220), 2, cv2.LINE_AA, tipLength=0.2)
+    cv2.arrowedLine(canvas, o, py, (0, 200,   0), 2, cv2.LINE_AA, tipLength=0.2)
+    cv2.arrowedLine(canvas, o, pz, (220,  0,   0), 2, cv2.LINE_AA, tipLength=0.2)
+    return canvas
+
+
+def draw_attention_metrics(
+    frame:    "np.ndarray",
+    analysis: "AttentionAnalysis",   # src.signals.attention.AttentionAnalysis
+    *,
+    origin:   tuple = (10, 200),
+) -> "np.ndarray":
+    """Draw head-pose and attention HUD panel onto a copy of *frame*."""
+    from src.signals.attention import AttentionZone  # local to avoid circular
+
+    canvas = frame.copy()
+    x, y   = origin
+    lh     = 22
+    font   = cv2.FONT_HERSHEY_SIMPLEX
+
+    zone_colors = {
+        AttentionZone.FOCUSED:      (0, 230, 80),
+        AttentionZone.GLANCE:       (0, 200, 255),
+        AttentionZone.LOOKING_AWAY: (0, 50,  255),
+    }
+    zone_col = zone_colors.get(analysis.zone, (200, 200, 200))
+    _text(canvas, f"Zone: {analysis.zone.value.upper()}", x, y, font, 0.55, zone_col)
+
+    _text(canvas,
+          f"Yaw:{analysis.yaw:+.1f}°  Pitch:{analysis.pitch:+.1f}°  Roll:{analysis.roll:+.1f}°",
+          x, y + lh, font, 0.45, (200, 200, 200))
+
+    _text(canvas,
+          f"Stability  Y-std:{analysis.yaw_std:.1f}°  P-std:{analysis.pitch_std:.1f}°",
+          x, y + lh * 2, font, 0.45, (200, 200, 200))
+
+    attn_pct = analysis.attention_fraction * 100.0
+    attn_col = (0, 230, 80) if attn_pct >= 70 else (0, 200, 255) if attn_pct >= 40 else (0, 50, 255)
+    _text(canvas, f"Attention: {attn_pct:.0f}%", x, y + lh * 3, font, 0.48, attn_col)
+
+    _text(canvas,
+          f"Reproj err: {analysis.reprojection_error:.1f} px",
+          x, y + lh * 4, font, 0.42, (160, 160, 160))
+
+    return canvas
+
+
 def draw_status_text(
     frame: np.ndarray,
     text:  str,

@@ -99,6 +99,25 @@ signals:
     # Suppress rate-based flags until this many seconds of history exist.
     min_history_s:            15.0
 
+# ── Head pose estimation ─────────────────────────────────────────────────────
+head_pose:
+  # Camera intrinsics approximation: focal_length = focal_scale × frame_width.
+  # 1.0 works well for typical 60–90° FOV webcams at 640×480.
+  # Tune if you see large systematic yaw/pitch offsets when looking straight ahead.
+  focal_scale: 1.0
+
+  # Reprojection error above this (pixels) is logged as a warning.
+  # Typical good-quality pose: < 5 px.  > 10 px → landmark noise or far face.
+  max_reprojection_error: 10.0
+
+  # Attention zone thresholds (degrees).
+  attention:
+    yaw_focus_deg:    20.0   # |yaw|  ≤ this → inside focus zone
+    pitch_focus_deg:  15.0   # |pitch| ≤ this → inside focus zone
+    yaw_glance_deg:   35.0   # |yaw|  ≤ this → glance zone (beyond focus)
+    pitch_glance_deg: 25.0   # |pitch| ≤ this → glance zone
+    stability_window_s: 5.0  # seconds of history for std-dev computation
+
 # ── Model defaults ────────────────────────────────────────────────────────────
 model:
   batch_size: 1
