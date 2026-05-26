@@ -154,6 +154,113 @@ def draw_fps_counter(
     return canvas
 
 
+def draw_eye_metrics(
+    frame:    np.ndarray,
+    analysis: "BlinkAnalysis",        # src.signals.blink_detector.BlinkAnalysis
+    ear_l:    float,
+    ear_r:    float,
+    *,
+    origin:   tuple[int, int] = (10, 60),
+) -> np.ndarray:
+    """Draw an eye-metrics HUD panel onto a copy of *frame*.
+
+    Renders: state badge, EAR values, openness bars, blink count + rate,
+    and a fatigue indicator.  Positioned at *origin* (top-left corner of panel).
+
+    The type annotation for analysis is a string to avoid a circular import —
+    this function is called from run_blink_test.py which imports both modules.
+    """
+    from src.signals.blink_detector import BlinkState  # local to avoid circular
+
+    canvas = frame.copy()
+    x, y   = origin
+    lh     = 22          # line height in pixels
+    font   = cv2.FONT_HERSHEY_SIMPLEX
+
+    # ── State badge ──────────────────────────────────────────────────────────
+    state_colors = {
+        BlinkState.OPEN:    (0, 230, 80),
+        BlinkState.CLOSING: (0, 200, 255),
+        BlinkState.CLOSED:  (0, 60,  255),
+        BlinkState.OPENING: (0, 200, 255),
+    }
+    state_col = state_colors.get(analysis.state, (200, 200, 200))
+    _text(canvas, f"Eye: {analysis.state.value.upper()}", x, y,       font, 0.55, state_col)
+
+    # ── EAR values ───────────────────────────────────────────────────────────
+    _text(canvas, f"EAR  L:{ear_l:.3f}  R:{ear_r:.3f}  M:{analysis.mean_ear:.3f}",
+          x, y + lh,   font, 0.48, (200, 200, 200))
+
+    # ── Openness bars (left / right) ─────────────────────────────────────────
+    bar_w    = 80
+    bar_h    = 8
+    bar_y    = y + lh * 2 + 4
+    bar_x_l  = x
+    bar_x_r  = x + bar_w + 12
+
+    _openness_bar(canvas, bar_x_l, bar_y, bar_w, bar_h,
+                  analysis.mean_openness, label="")
+    _text(canvas, f"open {analysis.mean_openness:.2f}",
+          bar_x_l, bar_y + bar_h + 12, font, 0.42, (180, 180, 180))
+
+    # ── Blink stats ───────────────────────────────────────────────────────────
+    rate_s = f"{analysis.blink_rate_per_min:.1f}/min"
+    _text(canvas, f"Blinks: {analysis.blink_count}  rate: {rate_s}",
+          x, y + lh * 4, font, 0.48, (200, 200, 200))
+
+    # ── Fatigue badge ─────────────────────────────────────────────────────────
+    fatigue_colors = {"LOW": (0, 200, 80), "MODERATE": (0, 160, 255), "HIGH": (0, 50, 255)}
+    fat_col = fatigue_colors.get(analysis.fatigue_label, (200, 200, 200))
+    flags   = []
+    if analysis.is_low_blink_rate:    flags.append("LOW-BLINK")
+    if analysis.is_high_blink_rate:   flags.append("HIGH-BLINK")
+    if analysis.is_prolonged_closure: flags.append("PROLONGED")
+    flag_str = "  ".join(flags) if flags else "normal"
+    _text(canvas, f"Fatigue: {analysis.fatigue_label}  [{flag_str}]",
+          x, y + lh * 5, font, 0.48, fat_col)
+
+    return canvas
+
+
+def _text(
+    img:   "np.ndarray",
+    text:  str,
+    x:     int,
+    y:     int,
+    font:  int,
+    scale: float,
+    color: tuple,
+    thickness: int = 1,
+) -> None:
+    """Draw text with a thin black shadow for readability on any background."""
+    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0),       thickness + 1, cv2.LINE_AA)
+    cv2.putText(img, text, (x, y), font, scale, color,             thickness,     cv2.LINE_AA)
+
+
+def _openness_bar(
+    img:      "np.ndarray",
+    x:        int,
+    y:        int,
+    width:    int,
+    height:   int,
+    fraction: float,
+    label:    str,
+) -> None:
+    """Draw a filled progress bar representing openness in [0, 1]."""
+    fraction = max(0.0, min(1.0, fraction))
+    # Background
+    cv2.rectangle(img, (x, y), (x + width, y + height), (60, 60, 60), -1)
+    # Fill
+    fill_w = int(width * fraction)
+    if fill_w > 0:
+        # Colour transitions green → yellow → red with openness
+        g = int(230 * fraction)
+        r = int(230 * (1.0 - fraction))
+        cv2.rectangle(img, (x, y), (x + fill_w, y + height), (0, g, r), -1)
+    # Border
+    cv2.rectangle(img, (x, y), (x + width, y + height), (120, 120, 120), 1)
+
+
 def draw_status_text(
     frame: np.ndarray,
     text:  str,

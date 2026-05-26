@@ -64,6 +64,41 @@ overlay:
   show_fps:         true
   show_bbox:        false
 
+# ── Behavioral signal layer ───────────────────────────────────────────────────
+signals:
+  # EAR normalisation references — population averages.
+  # Increase ear_open_ref if EAR rarely reaches 1.0 openness for your camera distance.
+  ear_closed_ref: 0.15
+  ear_open_ref:   0.35
+
+  blink:
+    # Detection thresholds — the gap between close and open creates hysteresis.
+    # If you see false positives: raise ear_close_threshold slightly (e.g. 0.22).
+    # If real blinks are missed:  lower ear_close_threshold (e.g. 0.18).
+    ear_close_threshold:      0.20
+    ear_open_threshold:       0.25
+
+    # Debounce: frames that must remain in a state before it is confirmed.
+    # At 25 FPS: 2 frames ≈ 80 ms — enough to reject single-frame jitter.
+    min_close_frames:         2
+    min_open_frames:          2
+
+    # Duration gate (milliseconds).
+    # Normal blink: ~80–200 ms.  Slow close: up to 400 ms.
+    min_blink_ms:             60.0
+    max_blink_ms:             500.0
+
+    # Rolling window and rate thresholds.
+    rate_window_s:            60.0
+    low_blink_rate_threshold:  8.0   # below → staring / early fatigue
+    high_blink_rate_threshold: 25.0  # above → eye strain
+
+    # Drowsiness: single closure longer than this triggers the drowsy flag.
+    drowsy_closure_ms:        500.0
+
+    # Suppress rate-based flags until this many seconds of history exist.
+    min_history_s:            15.0
+
 # ── Model defaults ────────────────────────────────────────────────────────────
 model:
   batch_size: 1
