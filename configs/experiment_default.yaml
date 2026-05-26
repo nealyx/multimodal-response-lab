@@ -1,0 +1,94 @@
+# configs/experiment_default.yaml
+#
+# Default experiment configuration for stimulus-response sessions.
+#
+# Usage:
+#   python run_stimulus_experiment.py                      # uses this file
+#   python run_stimulus_experiment.py --experiment my.yaml # custom experiment
+#
+# Each stimulus type is repeated n_trials times.  Trials are interleaved in
+# declaration order by default; set randomise_order: true to shuffle.
+# Inter-stimulus interval (ISI) has uniform ±isi_jitter_s randomisation so
+# the participant cannot anticipate trial onset.
+
+experiment:
+  name: "attention_probe_v1"
+
+  # Baseline period before the first stimulus.  The engagement scorer needs
+  # ~10 s warm-up, so baseline_duration_s should be at least 10.
+  baseline_duration_s: 12.0
+
+  # Mean inter-stimulus interval (seconds between offset of one stimulus and
+  # onset of the next).  Actual ISI = max(0.5, isi_s ± isi_jitter_s).
+  inter_stimulus_interval_s: 5.0
+  isi_jitter_s: 1.5             # uniform jitter — prevents rhythmic anticipation
+
+  # Whether to randomise the order of the flattened trial list.
+  randomise_order: false
+
+  # Cap on total session length.  Script quits after this many seconds even
+  # if the trial schedule is not exhausted.
+  max_duration_s: 300.0
+
+  stimuli:
+    # ── Color flashes ─────────────────────────────────────────────────────
+    # Simple full-screen luminance change.  Elicits a rapid orienting response
+    # detectable via gaze zone change.
+    - type: color_flash
+      id_prefix: flash
+      color: [0, 100, 255]       # BGR orange
+      alpha: 0.45
+      region: full               # full = entire frame
+      duration_ms: 250
+      n_trials: 4
+
+    # ── Shape stimuli ─────────────────────────────────────────────────────
+    # Static shape at screen centre.  Tests sustained gaze toward stimulus.
+    - type: shape
+      id_prefix: shape
+      shape: circle              # circle | square | cross | arrow_up | arrow_right
+      color: [220, 60, 60]       # BGR blue
+      size: 80
+      position: center
+      duration_ms: 1500
+      n_trials: 3
+
+    # Off-centre shape — tests spatial attention allocation.
+    - type: shape
+      id_prefix: offcenter
+      shape: square
+      color: [60, 200, 60]       # BGR green
+      size: 70
+      position: right
+      duration_ms: 1500
+      n_trials: 3
+
+    # ── Moving target ─────────────────────────────────────────────────────
+    # Target moves horizontally across the frame.  Watch for smooth-pursuit
+    # gaze tracking (gaze_zone cycling LEFT→CENTER→RIGHT) and on-screen
+    # fraction staying high.
+    - type: moving_target
+      id_prefix: track
+      color: [50, 220, 50]       # BGR green
+      size: 34
+      speed_px_per_s: 110
+      path: horizontal           # horizontal | vertical | diagonal | circular
+      duration_ms: 2500
+      n_trials: 3
+
+    # ── Reaction prompts ──────────────────────────────────────────────────
+    # Explicit key-press instruction.  Gives the most precise latency
+    # measurement: press SPACE as soon as you see the prompt.
+    - type: reaction_prompt
+      id_prefix: react
+      text: "PRESS SPACE"
+      color: [0, 220, 255]       # BGR yellow
+      response_key: space
+      duration_ms: 3000          # max wait before moving on
+      n_trials: 5
+
+# ── Output settings ────────────────────────────────────────────────────────────
+output:
+  directory: "outputs/sessions"  # sessions/<session_id>/ created automatically
+  save_json: true
+  save_csv:  true
