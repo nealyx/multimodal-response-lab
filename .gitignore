@@ -1,0 +1,68 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.Python
+pip-wheel-metadata/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Testing ────────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── Notebooks ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+experiments/**/*.ipynb
+
+# ── ML artifacts — keep directory structure, never weights ────────────────────
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.onnx
+.cache/
+
+# ── Data — keep placeholders, not raw files ────────────────────────────────────
+data/raw/
+data/processed/
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# ── Outputs ────────────────────────────────────────────────────────────────────
+outputs/
+!outputs/.gitkeep
+
+# ── Secrets / environment ──────────────────────────────────────────────────────
+.env
+.env.local
+.env.*
+secrets.yaml
+
+# ── Logs ───────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── macOS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── IDE ────────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo

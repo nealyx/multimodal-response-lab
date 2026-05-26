@@ -1,0 +1,29 @@
+# ── Core ML framework ─────────────────────────────────────────────────────────
+# MPS (Apple Silicon GPU) support stabilized in 2.0; require it as the floor.
+# Install the correct torch build for your platform via the instructions in
+# README.md — do NOT install the PyPI wheel on macOS with CUDA flags.
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# ── Config management ─────────────────────────────────────────────────────────
+PyYAML>=6.0
+
+# ── Computer vision / capture ─────────────────────────────────────────────────
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# ── Numerical computing ───────────────────────────────────────────────────────
+numpy>=1.24.0
+
+# ── Progress / CLI ────────────────────────────────────────────────────────────
+tqdm>=4.65.0
+rich>=13.0.0          # structured console output for dev/debug runs
+
+# ── Multimodal models (Hugging Face ecosystem) ────────────────────────────────
+transformers>=4.35.0
+accelerate>=0.24.0    # device placement & mixed-precision helpers
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=7.4.0
+pytest-cov>=4.1.0

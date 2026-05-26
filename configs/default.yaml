@@ -1,0 +1,41 @@
+# configs/default.yaml
+#
+# Central runtime configuration for multimodal-response-lab.
+#
+# Design principle: every value that a downstream module might want to tweak
+# lives here, not hardcoded.  Modules receive a config dict/object; they never
+# import this file directly.  This makes unit-testing trivial (pass a dict
+# override) and environment-specific overrides possible (prod.yaml, test.yaml).
+
+# ── Device ────────────────────────────────────────────────────────────────────
+device:
+  # "auto"  → probe CUDA → MPS → CPU in order
+  # "cuda"  → require NVIDIA GPU (raises if absent and allow_fallback: false)
+  # "mps"   → require Apple Silicon GPU
+  # "cpu"   → always use CPU (useful for profiling or CI)
+  preferred: auto
+  allow_fallback: true   # degrade gracefully instead of crashing on missing HW
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  level: INFO            # DEBUG | INFO | WARNING | ERROR | CRITICAL
+  format: "%(asctime)s  %(levelname)-8s  %(name)s — %(message)s"
+  datefmt: "%H:%M:%S"
+
+# ── Filesystem paths ──────────────────────────────────────────────────────────
+paths:
+  data_root: data/
+  model_cache: .cache/models/   # HF_HOME is also respected if set in env
+  outputs: outputs/
+
+# ── Capture pipeline (stub — populated when pipeline module is added) ─────────
+capture:
+  fps: 30
+  resolution: [640, 480]
+  backend: opencv          # opencv | picamera2
+
+# ── Model defaults ────────────────────────────────────────────────────────────
+model:
+  batch_size: 1
+  fp16: false              # half-precision on CUDA; has no effect on MPS/CPU
+  compile: false           # torch.compile — speeds up CUDA, breaks MPS (2.x)
