@@ -44,7 +44,7 @@ capture:
   # Set to "avfoundation" to force the macOS native backend; this avoids
   # GStreamer/Qt being picked up when those libraries are present.
   # Override at runtime with --backend NAME without editing this file.
-  backend: auto            # auto | avfoundation | any | qt | v4l2 | dshow
+  backend: avfoundation         # prev. auto, changed to avfoundation.  
 
   flip_horizontal: true    # mirror mode — natural for a selfie-camera view
   # Camera warm-up: discard leading blank frames that AVFoundation emits while
