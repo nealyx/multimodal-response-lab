@@ -128,6 +128,33 @@ head_pose:
     pitch_glance_deg: 25.0   # |pitch| ≤ this → glance zone
     stability_window_s: 5.0  # seconds of history for std-dev computation
 
+# ── Gaze estimation ──────────────────────────────────────────────────────────
+gaze:
+  # Iris horizontal ratio thresholds for CENTER zone.
+  # The ratio is (iris_x − left_corner_x) / (right_corner_x − left_corner_x).
+  # 0.0 = iris at image-left extreme, 0.5 = centred, 1.0 = image-right extreme.
+  # Widen the band (e.g. 0.30–0.70) if you see too many false LEFT/RIGHT alerts.
+  center_h_lo: 0.35
+  center_h_hi: 0.65
+
+  # Iris vertical ratio thresholds for CENTER zone.
+  # 0.0 = looking up (iris near top lid), 1.0 = looking down (iris near bottom lid).
+  # Slightly asymmetric: looking down is normal during screen use.
+  center_v_lo: 0.25
+  center_v_hi: 0.70
+
+  # Minimum EAR for iris measurement to be considered reliable.
+  # Below this, the eyelid is occluding the iris.
+  ear_reliable_min: 0.15
+
+  # Head pose gates for is_on_screen: even if iris is centred, the head being
+  # turned beyond these angles marks the frame as off-screen.
+  head_yaw_max_on_screen:   25.0   # degrees
+  head_pitch_max_on_screen: 20.0   # degrees
+
+  # Rolling window for stability std-dev and on_screen_fraction computation.
+  stability_window_s: 5.0
+
 # ── Model defaults ────────────────────────────────────────────────────────────
 model:
   batch_size: 1

@@ -340,6 +340,82 @@ def draw_attention_metrics(
     return canvas
 
 
+def draw_iris_markers(
+    frame:       "np.ndarray",
+    measurement: "GazeMeasurement",   # src.signals.gaze.GazeMeasurement
+    *,
+    radius:      int = 4,
+) -> "np.ndarray":
+    """Draw filled circles at each iris centre and a cross-hair at gaze centroid.
+
+    The circle colour indicates reliability:
+      cyan  — reliable (EAR adequate)
+      red   — unreliable (eyes too closed)
+    """
+    canvas = frame.copy()
+    color  = (255, 220, 0) if measurement.is_reliable else (0, 80, 220)
+
+    lx, ly = int(measurement.left_iris_px[0]),  int(measurement.left_iris_px[1])
+    rx, ry = int(measurement.right_iris_px[0]), int(measurement.right_iris_px[1])
+
+    cv2.circle(canvas, (lx, ly), radius,     color, -1, cv2.LINE_AA)
+    cv2.circle(canvas, (lx, ly), radius + 2, (0, 0, 0), 1, cv2.LINE_AA)
+    cv2.circle(canvas, (rx, ry), radius,     color, -1, cv2.LINE_AA)
+    cv2.circle(canvas, (rx, ry), radius + 2, (0, 0, 0), 1, cv2.LINE_AA)
+    return canvas
+
+
+def draw_gaze_metrics(
+    frame:    "np.ndarray",
+    analysis: "GazeAnalysis",   # src.signals.gaze.GazeAnalysis
+    *,
+    origin:   tuple = (10, 380),
+) -> "np.ndarray":
+    """Draw gaze zone HUD panel onto a copy of *frame*."""
+    from src.signals.gaze import GazeZone  # local to avoid circular
+
+    canvas = frame.copy()
+    x, y   = origin
+    lh     = 22
+    font   = cv2.FONT_HERSHEY_SIMPLEX
+
+    zone_colors = {
+        GazeZone.CENTER:     (0, 230, 80),
+        GazeZone.UP:         (0, 200, 255),
+        GazeZone.DOWN:       (0, 200, 255),
+        GazeZone.LEFT:       (0, 160, 255),
+        GazeZone.RIGHT:      (0, 160, 255),
+        GazeZone.UP_LEFT:    (0, 100, 255),
+        GazeZone.UP_RIGHT:   (0, 100, 255),
+        GazeZone.DOWN_LEFT:  (0, 100, 255),
+        GazeZone.DOWN_RIGHT: (0, 100, 255),
+        GazeZone.UNRELIABLE: (80, 80, 80),
+    }
+    zone_col = zone_colors.get(analysis.zone, (200, 200, 200))
+    _text(canvas, f"Gaze: {analysis.zone.value.upper().replace('_', '-')}",
+          x, y, font, 0.55, zone_col)
+
+    _text(canvas,
+          f"H:{analysis.mean_h:.2f}  V:{analysis.mean_v:.2f}  "
+          f"{'reliable' if analysis.is_reliable else 'unreliable'}",
+          x, y + lh, font, 0.45, (200, 200, 200))
+
+    _text(canvas,
+          f"Stability  H-std:{analysis.stability_h:.3f}  V-std:{analysis.stability_v:.3f}",
+          x, y + lh * 2, font, 0.45, (200, 200, 200))
+
+    on_col = (0, 230, 80) if analysis.is_on_screen else (0, 50, 255)
+    on_str = "ON SCREEN" if analysis.is_on_screen else "OFF SCREEN"
+    _text(canvas, f"Screen: {on_str}", x, y + lh * 3, font, 0.50, on_col)
+
+    frac_pct = analysis.on_screen_fraction * 100.0
+    frac_col = (0, 230, 80) if frac_pct >= 70 else (0, 200, 255) if frac_pct >= 40 else (0, 50, 255)
+    _text(canvas, f"On-screen: {frac_pct:.0f}%  (last 5 s)",
+          x, y + lh * 4, font, 0.45, frac_col)
+
+    return canvas
+
+
 def draw_status_text(
     frame: np.ndarray,
     text:  str,
