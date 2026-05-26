@@ -12,6 +12,9 @@ PyYAML>=6.0
 # ── Computer vision / capture ─────────────────────────────────────────────────
 opencv-python>=4.8.0
 Pillow>=10.0.0
+# mediapipe ships its own bundled native libs; no separate protobuf pin needed.
+# 0.10+ uses the new Task API but still exposes the legacy solutions namespace.
+mediapipe>=0.10.0
 
 # ── Numerical computing ───────────────────────────────────────────────────────
 numpy>=1.24.0

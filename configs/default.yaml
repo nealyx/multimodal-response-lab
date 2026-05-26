@@ -28,11 +28,41 @@ paths:
   model_cache: .cache/models/   # HF_HOME is also respected if set in env
   outputs: outputs/
 
-# ── Capture pipeline (stub — populated when pipeline module is added) ─────────
+# ── Webcam capture ────────────────────────────────────────────────────────────
 capture:
+  device_id: 0             # OS camera index (0 = first/built-in)
   fps: 30
   resolution: [640, 480]
-  backend: opencv          # opencv | picamera2
+  # backend: "auto" tries CAP_AVFOUNDATION → CAP_ANY → CAP_QT in order.
+  # Set explicitly to force a specific backend for debugging.
+  backend: auto            # auto | avfoundation | any | qt | v4l2 | dshow
+  flip_horizontal: true    # mirror mode — natural for a selfie-camera view
+  # Camera warm-up: discard leading blank frames that AVFoundation emits while
+  # the sensor initialises.  Increase warmup_frames if a slow USB camera still
+  # shows blank frames on first detection.
+  warmup_frames: 30        # max frames to read before declaring the backend dead
+  warmup_timeout_s: 6.0   # wall-clock timeout for the warm-up phase
+  min_frame_mean: 1.0      # frames with mean pixel value below this are blank
+
+# ── MediaPipe Face Mesh ───────────────────────────────────────────────────────
+face_mesh:
+  # model_path: path to the downloaded .task bundle.  Auto-downloaded on first
+  # run if absent.  Float16 variant ≈ 3 MB; runs on CPU without GPU.
+  model_path: .cache/models/face_landmarker.task
+  max_faces: 1
+  min_detection_confidence: 0.5
+  min_presence_confidence:  0.5
+  min_tracking_confidence:  0.5
+
+# ── Overlay rendering ─────────────────────────────────────────────────────────
+overlay:
+  draw_tesselation: true
+  draw_contour:     true
+  draw_eyes:        true
+  draw_lips:        true
+  draw_irises:      false   # requires face_mesh.refine_landmarks: true
+  show_fps:         true
+  show_bbox:        false
 
 # ── Model defaults ────────────────────────────────────────────────────────────
 model:
