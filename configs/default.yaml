@@ -155,6 +155,39 @@ gaze:
   # Rolling window for stability std-dev and on_screen_fraction computation.
   stability_window_s: 5.0
 
+# ── Composite engagement scoring ─────────────────────────────────────────────
+engagement:
+  # Component weights — must sum to 1.0.
+  # Gaze is the primary signal; eye alertness outweighs head because head pose
+  # is already partially captured by the gaze on-screen gate.
+  weights:
+    gaze: 0.50
+    head: 0.20
+    eye:  0.30
+
+  # Score thresholds for state classification.
+  thresholds:
+    focused:        0.72   # score ≥ this → FOCUSED
+    drifting:       0.45   # score ≥ this → DRIFTING (else DISTRACTED)
+    min_confidence: 0.20   # below this → UNRELIABLE regardless of score
+
+  # Temporal smoothing — EMA and state debounce.
+  # alpha=0.10 at 25 FPS gives a ~0.4 s half-life (absorbs blink transients).
+  # state_min_frames=5 prevents state-badge flicker on single-frame anomalies.
+  smoothing:
+    alpha:            0.10
+    state_min_frames: 5
+
+  # Confidence score parameters.
+  # min_history_s: seconds of face presence before confidence reaches 1.0.
+  # pose_error_max: reprojection error (px) that fully penalises confidence.
+  confidence:
+    min_history_s:  10.0
+    pose_error_max: 10.0
+
+  # Rolling window for focused_fraction / engaged_fraction computation.
+  rolling_window_s: 60.0
+
 # ── Model defaults ────────────────────────────────────────────────────────────
 model:
   batch_size: 1

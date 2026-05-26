@@ -416,6 +416,121 @@ def draw_gaze_metrics(
     return canvas
 
 
+def draw_engagement_dashboard(
+    frame:    "np.ndarray",
+    score:    "EngagementScore",   # src.signals.engagement.EngagementScore
+    blink:    "Optional[BlinkAnalysis]" = None,
+    *,
+    origin:   tuple = (10, 10),
+    bar_width: int = 160,
+) -> "np.ndarray":
+    """Draw a composite engagement dashboard panel onto a copy of *frame*.
+
+    Panel layout (top-down at *origin*):
+      - State badge with colour coding
+      - Composite score + confidence progress bars
+      - Component sub-bars: gaze / head / eye
+      - Rolling focused % and engaged %
+      - Blink rate and fatigue label (when blink is provided)
+    """
+    from src.signals.engagement import EngagementState  # local to avoid circular
+
+    canvas = frame.copy()
+    x, y   = origin
+    lh     = 20
+    font   = cv2.FONT_HERSHEY_SIMPLEX
+
+    # ── State badge ──────────────────────────────────────────────────────────
+    state_colors = {
+        EngagementState.FOCUSED:    (0, 220, 80),
+        EngagementState.DRIFTING:   (0, 200, 255),
+        EngagementState.DISTRACTED: (0, 80,  255),
+        EngagementState.FATIGUED:   (0, 50,  200),
+        EngagementState.UNRELIABLE: (80, 80,  80),
+    }
+    state_col = state_colors.get(score.state, (200, 200, 200))
+    label     = score.state.value.upper()
+    _text(canvas, f"Engagement: {label}", x, y + lh, font, 0.58, state_col, thickness=2)
+
+    # ── Composite score bar ───────────────────────────────────────────────────
+    row = y + lh * 2 + 4
+    _text(canvas, f"Score  {score.smoothed_score:.2f}", x, row, font, 0.45, (200, 200, 200))
+    _score_bar(canvas, x + 100, row - 12, bar_width, 10, score.smoothed_score,
+               lo_color=(0, 60, 230), hi_color=(0, 200, 60))
+
+    # ── Confidence bar ────────────────────────────────────────────────────────
+    row += lh
+    conf_col = (0, 200, 60) if score.confidence >= 0.6 else (0, 160, 230) if score.confidence >= 0.3 else (80, 80, 80)
+    _text(canvas, f"Conf   {score.confidence:.2f}", x, row, font, 0.45, conf_col)
+    _score_bar(canvas, x + 100, row - 12, bar_width, 10, score.confidence,
+               lo_color=(60, 60, 80), hi_color=(0, 200, 160))
+
+    # ── Component bars ────────────────────────────────────────────────────────
+    row += lh + 4
+    _text(canvas, "-- components --", x, row, font, 0.38, (120, 120, 120))
+
+    components = [
+        ("Gaze ", score.gaze_score),
+        ("Head ", score.head_score),
+        ("Eye  ", score.eye_score),
+    ]
+    for label_c, val in components:
+        row += lh - 2
+        _text(canvas, f"{label_c} {val:.2f}", x, row, font, 0.42, (180, 180, 180))
+        _score_bar(canvas, x + 100, row - 11, bar_width, 8, val,
+                   lo_color=(0, 60, 230), hi_color=(0, 200, 80))
+
+    # ── Rolling fractions ─────────────────────────────────────────────────────
+    row += lh + 2
+    f_pct = score.focused_fraction  * 100.0
+    e_pct = score.engaged_fraction  * 100.0
+    f_col = (0, 220, 80) if f_pct >= 70 else (0, 200, 255) if f_pct >= 40 else (0, 60, 255)
+    _text(canvas, f"Focused {f_pct:.0f}%  Engaged {e_pct:.0f}%",
+          x, row, font, 0.42, f_col)
+
+    # ── Blink / fatigue (optional) ────────────────────────────────────────────
+    if blink is not None:
+        row += lh
+        fatigue_colors = {"LOW": (0, 200, 80), "MODERATE": (0, 160, 255), "HIGH": (0, 50, 255)}
+        fat_col  = fatigue_colors.get(blink.fatigue_label, (200, 200, 200))
+        _text(canvas, f"Blink {blink.blink_rate_per_min:.1f}/min  [{blink.fatigue_label}]",
+              x, row, font, 0.42, fat_col)
+
+    # ── Active flags ──────────────────────────────────────────────────────────
+    flags = []
+    if score.is_fatigued:      flags.append("FATIGUE")
+    if score.is_looking_away:  flags.append("AWAY")
+    if not score.is_gaze_reliable:  flags.append("IRIS?")
+    if flags:
+        row += lh
+        _text(canvas, "Flags: " + "  ".join(flags), x, row, font, 0.40, (0, 120, 255))
+
+    return canvas
+
+
+def _score_bar(
+    img:       "np.ndarray",
+    x:         int,
+    y:         int,
+    width:     int,
+    height:    int,
+    fraction:  float,
+    *,
+    lo_color:  tuple = (0, 60, 230),
+    hi_color:  tuple = (0, 200, 60),
+) -> None:
+    """Draw a horizontal progress bar that blends between lo_color and hi_color."""
+    fraction = max(0.0, min(1.0, fraction))
+    cv2.rectangle(img, (x, y), (x + width, y + height), (40, 40, 40), -1)
+    fill_w = int(width * fraction)
+    if fill_w > 0:
+        r = int(lo_color[2] + (hi_color[2] - lo_color[2]) * fraction)
+        g = int(lo_color[1] + (hi_color[1] - lo_color[1]) * fraction)
+        b = int(lo_color[0] + (hi_color[0] - lo_color[0]) * fraction)
+        cv2.rectangle(img, (x, y), (x + fill_w, y + height), (b, g, r), -1)
+    cv2.rectangle(img, (x, y), (x + width, y + height), (100, 100, 100), 1)
+
+
 def draw_status_text(
     frame: np.ndarray,
     text:  str,
