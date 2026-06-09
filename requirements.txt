@@ -18,6 +18,8 @@ mediapipe>=0.10.0
 
 # ── Numerical computing ───────────────────────────────────────────────────────
 numpy>=1.24.0
+scikit-learn>=1.3.0   # PCA, KMeans, IsolationForest (Day 10 embeddings)
+matplotlib>=3.7.0     # charts and embedding plots (Days 8, 10)
 
 # ── Progress / CLI ────────────────────────────────────────────────────────────
 tqdm>=4.65.0
