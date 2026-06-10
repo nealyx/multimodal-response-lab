@@ -531,6 +531,191 @@ def _score_bar(
     cv2.rectangle(img, (x, y), (x + width, y + height), (100, 100, 100), 1)
 
 
+def draw_demo_overlay(
+    frame:    "np.ndarray",
+    score:    "EngagementScore",
+    blink:    "Optional[BlinkAnalysis]" = None,
+    *,
+    origin:   tuple = (10, 10),
+    width:    int   = 260,
+) -> "np.ndarray":
+    """Demo / presentation overlay — minimal, readable at a glance.
+
+    Shows only the metrics a presenter or stakeholder needs:
+      Top    : state badge + attention score bar
+      Middle : confidence (or "Calibrating" during warmup)
+      Lower  : gaze zone + on-screen status
+      Bottom : blink rate + fatigue label
+
+    Hides: raw EAR, H/V ratios, yaw/pitch/roll, reprojection error,
+           stability stats, component sub-scores.
+    """
+    from src.signals.engagement import EngagementState  # local to avoid circular
+
+    canvas = frame.copy()
+    x, y   = origin
+    lh     = 26
+    font   = cv2.FONT_HERSHEY_SIMPLEX
+
+    # Card background
+    pad = 10
+    card_h = lh * 7 + pad * 2 + 4
+    overlay = canvas.copy()
+    cv2.rectangle(overlay, (x - pad, y - pad),
+                  (x + width + pad, y + card_h), (15, 15, 30), -1)
+    cv2.addWeighted(overlay, 0.72, canvas, 0.28, 0, canvas)
+    cv2.rectangle(canvas, (x - pad, y - pad),
+                  (x + width + pad, y + card_h), (50, 50, 80), 1)
+
+    # ── State badge (large) ───────────────────────────────────────────────────
+    state_colors = {
+        EngagementState.FOCUSED:    (0, 220, 80),
+        EngagementState.DRIFTING:   (0, 200, 255),
+        EngagementState.DISTRACTED: (0, 80,  255),
+        EngagementState.FATIGUED:   (0, 50,  200),
+        EngagementState.UNRELIABLE: (80, 80,  80),
+    }
+    state_col = state_colors.get(score.state, (200, 200, 200))
+    _text(canvas, score.state.value.upper(), x, y + lh, font, 0.75, state_col, thickness=2)
+
+    # ── Attention score bar ───────────────────────────────────────────────────
+    row = y + lh + 10
+    pct = int(score.smoothed_score * 100)
+    score_col = (0, 220, 80) if pct >= 72 else (0, 200, 255) if pct >= 45 else (0, 80, 255)
+    _text(canvas, f"Attention  {pct}%", x, row + lh, font, 0.50, score_col)
+    _score_bar(canvas, x, row + lh + 4, width, 8, score.smoothed_score,
+               lo_color=(0, 60, 230), hi_color=(0, 200, 60))
+
+    # ── Confidence / calibrating ──────────────────────────────────────────────
+    row += lh + 20
+    cb = score.confidence_breakdown
+    if cb.warmup_remaining_s > 0.5:
+        remaining = int(cb.warmup_remaining_s)
+        _text(canvas, f"Calibrating  ({remaining}s)", x, row + lh, font, 0.45, (120, 160, 200))
+        _score_bar(canvas, x, row + lh + 4, width, 6, cb.history_warmup,
+                   lo_color=(40, 40, 80), hi_color=(80, 140, 220))
+    else:
+        conf_pct = int(score.confidence * 100)
+        conf_col = (0, 200, 60) if conf_pct >= 70 else (0, 180, 255) if conf_pct >= 40 else (80, 80, 80)
+        _text(canvas, f"Confidence  {conf_pct}%", x, row + lh, font, 0.50, conf_col)
+        _score_bar(canvas, x, row + lh + 4, width, 6, score.confidence,
+                   lo_color=(60, 60, 80), hi_color=(0, 200, 160))
+
+    # ── Divider ───────────────────────────────────────────────────────────────
+    row += lh + 22
+    cv2.line(canvas, (x, row), (x + width, row), (50, 50, 80), 1)
+    row += 8
+
+    # ── Gaze + screen status ──────────────────────────────────────────────────
+    on_col = (0, 220, 80) if score.is_gaze_reliable else (80, 80, 80)
+    _text(canvas, "Gaze", x, row + lh, font, 0.45, (160, 160, 160))
+    # We don't have gaze zone directly on EngagementScore; use flags
+    gaze_label = "ON SCREEN" if not score.is_looking_away else "OFF SCREEN"
+    gaze_col   = (0, 220, 80) if not score.is_looking_away else (0, 80, 255)
+    _text(canvas, gaze_label, x + 60, row + lh, font, 0.50, gaze_col)
+
+    row += lh + 4
+    # Head zone derived from is_looking_away flag
+    head_label = "FOCUSED" if not score.is_looking_away else "AWAY"
+    head_col   = (0, 220, 80) if not score.is_looking_away else (0, 80, 255)
+    _text(canvas, "Head", x, row + lh, font, 0.45, (160, 160, 160))
+    _text(canvas, head_label, x + 60, row + lh, font, 0.50, head_col)
+
+    # ── Divider ───────────────────────────────────────────────────────────────
+    row += lh + 4
+    cv2.line(canvas, (x, row), (x + width, row), (50, 50, 80), 1)
+    row += 8
+
+    # ── Blink rate + fatigue ──────────────────────────────────────────────────
+    if blink is not None:
+        fatigue_colors = {"LOW": (0, 200, 80), "MODERATE": (0, 160, 255), "HIGH": (0, 50, 255)}
+        fat_col = fatigue_colors.get(blink.fatigue_label, (200, 200, 200))
+        if blink.has_sufficient_data:
+            rate_str = f"{blink.blink_rate_per_min:.0f}/min"
+        else:
+            rate_str = "--/min"
+        _text(canvas, "Blink", x, row + lh, font, 0.45, (160, 160, 160))
+        _text(canvas, rate_str, x + 60, row + lh, font, 0.50, (200, 200, 200))
+        _text(canvas, blink.fatigue_label, x + 140, row + lh, font, 0.50, fat_col)
+    else:
+        _text(canvas, "Blink  --/min", x, row + lh, font, 0.45, (100, 100, 100))
+
+    return canvas
+
+
+def draw_diagnostics_panel(
+    frame:  "np.ndarray",
+    score:  "EngagementScore",
+    blink:  "Optional[BlinkAnalysis]" = None,
+    *,
+    origin: tuple = (10, 340),
+) -> "np.ndarray":
+    """Debug-only diagnostics panel: confidence breakdown + signal health.
+
+    Shows WHY confidence is low. Typical cause: history_warmup is < 1.0
+    because the session has been running for fewer seconds than min_history_s.
+    Example: Attention=100%, Score=0.86, Confidence=0.41 means 4.1 s / 10 s
+    elapsed — not a signal quality problem, just a warmup ramp.
+
+    Visible only when the run script is invoked with --debug.
+    """
+    canvas = frame.copy()
+    x, y   = origin
+    lh     = 17
+    font   = cv2.FONT_HERSHEY_SIMPLEX
+
+    _text(canvas, "── Diagnostics ──────────────────", x, y, font, 0.38, (80, 140, 220))
+
+    cb  = score.confidence_breakdown
+    row = y + lh
+
+    # History warmup row
+    w_pct = int(cb.history_warmup * 100)
+    w_col = (0, 200, 80) if w_pct >= 90 else (0, 180, 255) if w_pct >= 50 else (80, 80, 80)
+    _text(canvas, f"Warmup  {w_pct:3d}%", x, row, font, 0.38, w_col)
+    _score_bar(canvas, x + 100, row - 11, 80, 7, cb.history_warmup,
+               lo_color=(40, 40, 80), hi_color=(80, 160, 220))
+    if cb.warmup_remaining_s > 0.5:
+        _text(canvas, f"{cb.warmup_remaining_s:.0f}s left", x + 190, row, font, 0.34, (100, 100, 130))
+
+    row += lh
+    gq_pct = int(cb.gaze_quality * 100)
+    gq_col = (0, 200, 80) if gq_pct == 100 else (0, 160, 255)
+    _text(canvas, f"Gaze Q  {gq_pct:3d}%", x, row, font, 0.38, gq_col)
+    _score_bar(canvas, x + 100, row - 11, 80, 7, cb.gaze_quality,
+               lo_color=(0, 60, 200), hi_color=(0, 200, 80))
+    gaze_note = "reliable" if cb.gaze_quality >= 1.0 else "iris unreliable"
+    _text(canvas, gaze_note, x + 190, row, font, 0.34, (100, 100, 130))
+
+    row += lh
+    pq_pct = int(cb.pose_quality * 100)
+    pq_col = (0, 200, 80) if pq_pct >= 90 else (0, 160, 255)
+    _text(canvas, f"Pose Q  {pq_pct:3d}%", x, row, font, 0.38, pq_col)
+    _score_bar(canvas, x + 100, row - 11, 80, 7, cb.pose_quality,
+               lo_color=(0, 60, 200), hi_color=(0, 200, 80))
+
+    row += lh
+    ov_pct  = int(cb.overall * 100)
+    ov_col  = (0, 200, 80) if ov_pct >= 70 else (0, 160, 255) if ov_pct >= 40 else (80, 80, 80)
+    _text(canvas, f"Conf    {ov_pct:3d}%", x, row, font, 0.40, ov_col)
+    _score_bar(canvas, x + 100, row - 11, 80, 7, cb.overall,
+               lo_color=(60, 60, 80), hi_color=(0, 200, 160))
+    _text(canvas, f"= warmup×gaze×pose", x + 190, row, font, 0.32, (80, 80, 100))
+
+    # Blink data quality row
+    if blink is not None:
+        row += lh
+        if blink.has_sufficient_data:
+            bd_col = (0, 200, 80)
+            bd_txt = f"Blink  {blink.blink_rate_per_min:.1f}/min  data OK"
+        else:
+            bd_col = (0, 160, 255)
+            bd_txt = "Blink  warming up"
+        _text(canvas, bd_txt, x, row, font, 0.38, bd_col)
+
+    return canvas
+
+
 def draw_status_text(
     frame: np.ndarray,
     text:  str,

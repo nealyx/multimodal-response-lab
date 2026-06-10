@@ -80,7 +80,6 @@ Config keys (under signals.blink in default.yaml)
 from __future__ import annotations
 
 import logging
-import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -126,6 +125,7 @@ class BlinkAnalysis:
     is_prolonged_closure: bool              # single closure > drowsy_closure_ms
     is_drowsy:            bool              # compound indicator
     timestamp:            float
+    has_sufficient_data:  bool = True       # False during min_history_s warmup
 
     @property
     def fatigue_label(self) -> str:
@@ -181,7 +181,7 @@ class BlinkDetector:
         # History
         self._blink_count:  int                  = 0
         self._blink_events: deque[BlinkEvent]    = deque()
-        self._start_ts:     float                = time.perf_counter()
+        self._start_ts:     Optional[float]      = None  # set on first update
         self._last_analysis: Optional[BlinkAnalysis] = None
 
     # ── Public interface ───────────────────────────────────────────────────────
@@ -300,8 +300,15 @@ class BlinkDetector:
         while self._blink_events and self._blink_events[0].timestamp < cutoff:
             self._blink_events.popleft()
 
-        elapsed_s = now - self._start_ts
-        rate = len(self._blink_events) / self._rate_window_s * 60.0
+        if self._start_ts is None:
+            self._start_ts = now
+        elapsed_s = max(0.0, now - self._start_ts)
+
+        # Use elapsed time as denominator during warmup to avoid artificially
+        # low rates (e.g. 1 blink in 5 s reported as 1/min instead of 12/min).
+        # Once elapsed exceeds the full window, use the window for consistency.
+        effective_window = min(max(elapsed_s, 0.1), self._rate_window_s)
+        rate = len(self._blink_events) / effective_window * 60.0
 
         ms_since: Optional[float] = None
         if self._blink_events:
@@ -336,4 +343,5 @@ class BlinkDetector:
             is_prolonged_closure= prolonged,
             is_drowsy=            drowsy,
             timestamp=            now,
+            has_sufficient_data=  rate_flags_active,
         )

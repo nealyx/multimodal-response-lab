@@ -69,6 +69,8 @@ from src.signals.head_pose import build_camera_matrix, estimate_head_pose
 from src.utils.camera import print_camera_candidates
 from src.utils.overlay import (
     draw_attention_metrics,
+    draw_demo_overlay,
+    draw_diagnostics_panel,
     draw_engagement_dashboard,
     draw_eye_metrics,
     draw_face_mesh,
@@ -96,7 +98,7 @@ def _load_config(path: str) -> dict:
         return yaml.safe_load(fh)
 
 
-def run(cfg: dict, debug: bool) -> None:
+def run(cfg: dict, debug: bool, demo: bool = False) -> None:
     face_cfg    = cfg.get("face_mesh", {})
     capture_cfg = cfg.get("capture", {})
     overlay_cfg = cfg.get("overlay", {})
@@ -212,26 +214,35 @@ def run(cfg: dict, debug: bool) -> None:
                 if gaze_m is not None:
                     display = draw_iris_markers(display, gaze_m)
 
-                if pose is not None:
+                if not demo and pose is not None:
                     display = draw_head_axes(display, pose.rvec, pose.tvec, cam_matrix)
 
-                # Engagement dashboard — top-left, primary panel
-                display = draw_engagement_dashboard(
-                    display, eng, blink_a, origin=(10, 20),
-                )
-
-                # Smaller side panels on the right — all signals visible
-                rhs = w - 280
-                if att_a is not None:
-                    display = draw_attention_metrics(display, att_a, origin=(rhs, 60))
-                if gaze_a is not None:
-                    display = draw_gaze_metrics(display, gaze_a, origin=(rhs, 200))
-                if blink_a is not None and eye_m is not None:
-                    display = draw_eye_metrics(
-                        display, blink_a,
-                        ear_l=eye_m.left_ear, ear_r=eye_m.right_ear,
-                        origin=(rhs, 380),
+                if demo:
+                    # ── Demo mode: single clean card, no raw signal panels ─
+                    display = draw_demo_overlay(
+                        display, eng, blink_a, origin=(10, 20),
                     )
+                else:
+                    # ── Developer mode: full dashboard + all side panels ───
+                    display = draw_engagement_dashboard(
+                        display, eng, blink_a, origin=(10, 20),
+                    )
+                    rhs = w - 280
+                    if att_a is not None:
+                        display = draw_attention_metrics(display, att_a, origin=(rhs, 60))
+                    if gaze_a is not None:
+                        display = draw_gaze_metrics(display, gaze_a, origin=(rhs, 200))
+                    if blink_a is not None and eye_m is not None:
+                        display = draw_eye_metrics(
+                            display, blink_a,
+                            ear_l=eye_m.left_ear, ear_r=eye_m.right_ear,
+                            origin=(rhs, 380),
+                        )
+                    if debug:
+                        # ── Debug mode: confidence diagnostics panel ───────
+                        display = draw_diagnostics_panel(
+                            display, eng, blink_a, origin=(10, 340),
+                        )
 
             else:
                 no_face_streak += 1
@@ -247,9 +258,12 @@ def run(cfg: dict, debug: bool) -> None:
                     timestamp=result.timestamp_process,
                     frame_index=result.frame_index,
                 )
-                display = draw_engagement_dashboard(
-                    display, eng_absent, origin=(10, 20),
-                )
+                if demo:
+                    display = draw_demo_overlay(display, eng_absent, origin=(10, 20))
+                else:
+                    display = draw_engagement_dashboard(
+                        display, eng_absent, origin=(10, 20),
+                    )
                 display = draw_status_text(display, "No face detected")
 
             display = draw_fps_counter(display, fps)
@@ -287,7 +301,11 @@ def run(cfg: dict, debug: bool) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Composite engagement scoring — Day 6")
     parser.add_argument("--config", default="configs/default.yaml")
-    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--debug",  action="store_true",
+                        help="Developer mode + diagnostics panel")
+    parser.add_argument("--demo",   action="store_true",
+                        help="Presentation mode: clean minimal overlay, "
+                             "hides raw EAR/gaze ratios/yaw-pitch/reprojection")
     parser.add_argument(
         "--device", type=int, default=None, metavar="N",
         help="Camera device index (overrides capture.device_id in config)",
@@ -305,7 +323,7 @@ def main() -> None:
         cfg.setdefault("capture", {})["backend"] = args.backend
 
     _setup_logging(cfg.get("logging", {}), args.debug)
-    run(cfg, debug=args.debug)
+    run(cfg, debug=args.debug, demo=args.demo)
 
 
 if __name__ == "__main__":

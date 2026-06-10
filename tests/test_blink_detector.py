@@ -200,6 +200,57 @@ class TestRollingRate:
         # The old blink event should have been pruned from _blink_events.
         assert len(det._blink_events) == 0
 
+    def test_early_warmup_rate_not_artificially_low(self):
+        """At t≈1 s with 1 blink, rate should be ~60/min, NOT 1/min.
+
+        Old bug: dividing by full rate_window_s=60s gave 1/60*60=1/min.
+        Fixed:   dividing by elapsed_s≈1s gives 1/1*60=60/min.
+        """
+        det = BlinkDetector(_BASE_CFG)
+        ears = _make_blink_sequence(fps=30.0, close_dur_s=0.15,
+                                    pre_open=8, post_open=8)
+        _feed(det, ears, fps=30.0)
+        rate = det._last_analysis.blink_rate_per_min
+        # Elapsed ≈ (8+4+8)/30 ≈ 0.67 s, 1 blink → ~89/min; far above old 1/min
+        assert rate > 10.0, f"Expected rate >> 1/min at warmup, got {rate:.1f}"
+
+    def test_rate_converges_after_full_window(self):
+        """After elapsed > rate_window_s, rate denominator uses the full window."""
+        cfg = {
+            "blink": {
+                **_BASE_CFG["blink"],
+                "rate_window_s": 5.0,
+                "min_history_s": 0.0,
+            }
+        }
+        det = BlinkDetector(cfg)
+        blink = _make_blink_sequence(fps=30.0, close_dur_s=0.15, pre_open=5, post_open=5)
+
+        # Feed blinks for > 5 s worth of time to fill the window
+        for rep in range(6):
+            for i, ear in enumerate(blink):
+                ts = rep * len(blink) / 30.0 + i / 30.0
+                det.update(_measurement(ear, ts, frame_index=rep * 100 + i))
+
+        # After the full window has elapsed, rate should be stable
+        rate = det._last_analysis.blink_rate_per_min
+        assert rate > 0.0  # some blinks registered
+
+    def test_has_sufficient_data_false_before_warmup(self):
+        """has_sufficient_data is False before min_history_s has elapsed."""
+        cfg = {
+            "blink": {**_BASE_CFG["blink"], "min_history_s": 30.0}
+        }
+        det = BlinkDetector(cfg)
+        analysis = det.update(_measurement(0.30, 1.0))
+        assert analysis.has_sufficient_data is False
+
+    def test_has_sufficient_data_true_when_min_history_zero(self):
+        """With min_history_s=0, has_sufficient_data is True immediately."""
+        det = BlinkDetector(_BASE_CFG)   # min_history_s=0.0 in test cfg
+        analysis = det.update(_measurement(0.30, 0.0))
+        assert analysis.has_sufficient_data is True
+
 
 # ── no_face_update ────────────────────────────────────────────────────────────
 

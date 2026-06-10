@@ -98,11 +98,40 @@ import math
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Tuple
 from typing import Optional
 
 from src.signals.attention import AttentionAnalysis
 from src.signals.blink_detector import BlinkAnalysis
 from src.signals.gaze import GazeAnalysis
+
+
+# ── Confidence breakdown ──────────────────────────────────────────────────────
+
+@dataclass
+class ConfidenceBreakdown:
+    """What drives the confidence score — for diagnostics and honest display.
+
+    confidence = history_warmup × gaze_quality × pose_quality
+
+    history_warmup  — ramps 0→1 as elapsed time grows toward min_history_s.
+                      With min_history_s=10, it reaches 1.0 after 10 s.
+                      This is WHY confidence can be 0.41 while all signals look
+                      healthy: 4.1 s have elapsed out of 10 s required.
+
+    gaze_quality    — 0.75 when iris landmarks are unreliable or absent;
+                      1.00 when gaze is reliable.
+
+    pose_quality    — decreases as head-pose reprojection error rises above
+                      50% of pose_error_max.  Typically stays near 1.0.
+
+    warmup_remaining_s — seconds until history_warmup reaches 1.0.
+    """
+    history_warmup:      float   # 0–1, time-based warmup fraction
+    gaze_quality:        float   # 0–1, iris signal quality
+    pose_quality:        float   # 0–1, head-pose quality
+    overall:             float   # = history_warmup × gaze_quality × pose_quality
+    warmup_remaining_s:  float   # seconds until fully warmed up (0 when done)
 
 
 # ── State enum ────────────────────────────────────────────────────────────────
@@ -146,6 +175,11 @@ class EngagementScore:
 
     timestamp:   float
     frame_index: int
+
+    # Confidence decomposition (for diagnostics display)
+    confidence_breakdown: ConfidenceBreakdown = field(
+        default_factory=lambda: ConfidenceBreakdown(0.0, 0.0, 0.0, 0.0, 0.0)
+    )
 
 
 # ── Scorer ────────────────────────────────────────────────────────────────────
@@ -224,7 +258,7 @@ class AttentionScorer:
         is_gaze_reliable = (gaze is not None and gaze.is_reliable)
 
         # ── Confidence ────────────────────────────────────────────────────
-        confidence = self._compute_confidence(
+        confidence, conf_breakdown = self._compute_confidence(
             face_detected, gaze, head, timestamp,
         )
 
@@ -267,6 +301,7 @@ class AttentionScorer:
             is_gaze_reliable=is_gaze_reliable,
             timestamp=timestamp,
             frame_index=frame_index,
+            confidence_breakdown=conf_breakdown,
         )
 
     def reset(self) -> None:
@@ -346,31 +381,57 @@ class AttentionScorer:
         gaze:          Optional[GazeAnalysis],
         head:          Optional[AttentionAnalysis],
         timestamp:     float,
-    ) -> float:
-        if not face_detected:
-            return 0.0
+    ) -> tuple:
+        """Return (confidence: float, breakdown: ConfidenceBreakdown).
 
-        # Build up over time from first valid face frame
+        confidence = history_warmup × gaze_quality × pose_quality
+
+        Callers see a low confidence primarily because of history_warmup:
+        the score starts at 0 and ramps to 1 over min_history_s seconds.
+        This prevents false-positive FOCUSED classification in the first
+        few seconds before the EMA has stabilised.
+        """
+        if not face_detected:
+            bd = ConfidenceBreakdown(
+                history_warmup=0.0, gaze_quality=0.0, pose_quality=0.0,
+                overall=0.0, warmup_remaining_s=max(0.0, self._min_history_s),
+            )
+            return 0.0, bd
+
+        # ── History warmup ────────────────────────────────────────────────
         if self._t_first is not None:
             if self._min_history_s <= 0.0:
                 history_conf = 1.0
+                remaining_s  = 0.0
             else:
-                history_s = max(0.0, timestamp - self._t_first)
-                history_conf = min(1.0, history_s / self._min_history_s)
+                elapsed_s    = max(0.0, timestamp - self._t_first)
+                history_conf = min(1.0, elapsed_s / self._min_history_s)
+                remaining_s  = max(0.0, self._min_history_s - elapsed_s)
         else:
             history_conf = 0.0
+            remaining_s  = float(self._min_history_s)
 
-        # Penalise missing iris signal
-        gaze_penalty = 0.0 if (gaze is not None and gaze.is_reliable) else 0.25
+        # ── Gaze quality ──────────────────────────────────────────────────
+        gaze_quality = 1.0 if (gaze is not None and gaze.is_reliable) else 0.75
 
-        # Penalise high head-pose reprojection error
-        pose_penalty = 0.0
+        # ── Pose quality ──────────────────────────────────────────────────
+        pose_quality = 1.0
         if head is not None:
             excess = max(0.0, head.reprojection_error - self._pose_error_max * 0.5)
             pose_penalty = min(0.3, excess / max(self._pose_error_max, 1e-6))
+            pose_quality = 1.0 - pose_penalty
 
-        confidence = history_conf * (1.0 - gaze_penalty) * (1.0 - pose_penalty)
-        return max(0.0, min(1.0, confidence))
+        confidence = history_conf * gaze_quality * pose_quality
+        confidence  = max(0.0, min(1.0, confidence))
+
+        bd = ConfidenceBreakdown(
+            history_warmup=round(history_conf, 4),
+            gaze_quality=  round(gaze_quality, 4),
+            pose_quality=  round(pose_quality, 4),
+            overall=       round(confidence,   4),
+            warmup_remaining_s=round(remaining_s, 2),
+        )
+        return confidence, bd
 
     # ── Helpers ────────────────────────────────────────────────────────────
 

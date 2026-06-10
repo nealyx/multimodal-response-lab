@@ -335,6 +335,69 @@ class TestConfidence:
                          gaze=_gaze(), face_detected=True, timestamp=ts)
             assert 0.0 <= a.confidence <= 1.0
 
+    def test_confidence_breakdown_fields_present(self):
+        s = _scorer()
+        a = s.update(blink=_blink(0.9), head=_head(), gaze=_gaze(reliable=True),
+                     face_detected=True, timestamp=100.0)
+        cb = a.confidence_breakdown
+        assert 0.0 <= cb.history_warmup    <= 1.0
+        assert 0.0 <= cb.gaze_quality      <= 1.0
+        assert 0.0 <= cb.pose_quality      <= 1.0
+        assert 0.0 <= cb.overall           <= 1.0
+        assert cb.overall == pytest.approx(a.confidence, abs=0.01)
+
+    def test_confidence_breakdown_overall_matches_product(self):
+        """overall should equal history_warmup × gaze_quality × pose_quality."""
+        s = _scorer()
+        a = s.update(blink=_blink(0.8), head=_head(), gaze=_gaze(reliable=True),
+                     face_detected=True, timestamp=100.0)
+        cb = a.confidence_breakdown
+        expected = cb.history_warmup * cb.gaze_quality * cb.pose_quality
+        assert cb.overall == pytest.approx(expected, abs=0.01)
+
+    def test_confidence_breakdown_unreliable_gaze_lowers_gaze_quality(self):
+        s = _scorer()
+        a = s.update(gaze=_gaze(reliable=False), face_detected=True, timestamp=20.0)
+        assert a.confidence_breakdown.gaze_quality < 1.0
+
+    def test_confidence_breakdown_reliable_gaze_full_quality(self):
+        s = _scorer()
+        a = s.update(gaze=_gaze(reliable=True), face_detected=True, timestamp=20.0)
+        assert a.confidence_breakdown.gaze_quality == pytest.approx(1.0)
+
+    def test_confidence_breakdown_warmup_remaining_decreases_over_time(self):
+        cfg = {
+            "engagement": {
+                **_CFG["engagement"],
+                "confidence": {"min_history_s": 30.0, "pose_error_max": 10.0},
+            }
+        }
+        s = AttentionScorer(cfg)
+        a1 = s.update(face_detected=True, timestamp=5.0)
+        a2 = s.update(face_detected=True, timestamp=15.0)
+        assert a2.confidence_breakdown.warmup_remaining_s < \
+               a1.confidence_breakdown.warmup_remaining_s
+
+    def test_confidence_breakdown_zero_on_no_face(self):
+        s = _scorer()
+        a = s.update(face_detected=False, timestamp=100.0)
+        cb = a.confidence_breakdown
+        assert cb.history_warmup == pytest.approx(0.0)
+        assert cb.overall        == pytest.approx(0.0)
+
+    def test_confidence_breakdown_warmup_zero_remaining_when_done(self):
+        """After min_history_s elapsed, warmup_remaining_s should be 0."""
+        cfg = {
+            "engagement": {
+                **_CFG["engagement"],
+                "confidence": {"min_history_s": 5.0, "pose_error_max": 10.0},
+            }
+        }
+        s = AttentionScorer(cfg)
+        s.update(face_detected=True, timestamp=0.0)  # prime t_first
+        a = s.update(face_detected=True, timestamp=10.0)  # 10s > 5s
+        assert a.confidence_breakdown.warmup_remaining_s == pytest.approx(0.0)
+
 
 # ── Rolling fractions ─────────────────────────────────────────────────────────
 
