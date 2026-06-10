@@ -17,6 +17,7 @@ breaking callers if they only use the registry API.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import List, Optional
@@ -29,6 +30,7 @@ from src.dataset.participant import Participant
 log = logging.getLogger(__name__)
 
 DEFAULT_MANIFEST_NAME = "dataset_manifest.json"
+_PARTICIPANTS_DIR     = "participants"
 
 
 class DatasetRegistry:
@@ -74,6 +76,7 @@ class DatasetRegistry:
             return self._manifest.participants[p.participant_id]
 
         self._manifest.add_participant(p)
+        self._write_participant_dir(p)
         self._save()
         log.info("Registered participant '%s'", p.participant_id)
         return p
@@ -129,6 +132,7 @@ class DatasetRegistry:
         if p and entry.session_id not in p.session_ids:
             p.session_ids.append(entry.session_id)
 
+        self._write_session_dir(entry)
         self._save()
 
         n_issues = len(entry.quality_issues)
@@ -198,6 +202,34 @@ class DatasetRegistry:
         m.save(str(self._manifest_path))
         log.info("Created new dataset manifest at %s", self._manifest_path)
         return m
+
+    def _participant_dir(self, participant_id: str) -> Path:
+        return self._root / _PARTICIPANTS_DIR / participant_id
+
+    def _write_participant_dir(self, p: Participant) -> None:
+        """Create participants/<pid>/ hierarchy and write profile.json."""
+        p_dir = self._participant_dir(p.participant_id)
+        (p_dir / "calibration").mkdir(parents=True, exist_ok=True)
+        (p_dir / "sessions").mkdir(parents=True, exist_ok=True)
+        profile_path = p_dir / "profile.json"
+        with open(profile_path, "w", encoding="utf-8") as fh:
+            json.dump(p.to_dict(), fh, indent=2)
+        log.debug("Wrote participant profile to %s", profile_path)
+
+    def _write_session_dir(self, entry: SessionEntry) -> None:
+        """Write participants/<pid>/sessions/<sid>/session_entry.json."""
+        if not entry.participant_id:
+            return
+        s_dir = (
+            self._participant_dir(entry.participant_id)
+            / "sessions"
+            / entry.session_id
+        )
+        s_dir.mkdir(parents=True, exist_ok=True)
+        entry_path = s_dir / "session_entry.json"
+        with open(entry_path, "w", encoding="utf-8") as fh:
+            json.dump(entry.to_dict(), fh, indent=2)
+        log.debug("Wrote session entry to %s", entry_path)
 
     def _save(self) -> None:
         self._root.mkdir(parents=True, exist_ok=True)

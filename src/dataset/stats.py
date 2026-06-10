@@ -64,6 +64,13 @@ class DatasetStats:
     label_distribution:        Dict[str, Dict[str, int]] = field(default_factory=dict)
     engagement_distribution:   Dict[str, float]          = field(default_factory=dict)
     mean_engagement_score:     float                     = 0.0
+    mean_on_screen_fraction:   float                     = 0.0
+    mean_blink_rate:           float                     = 0.0
+    # Missing-data counts (sessions with zero for that artefact)
+    sessions_missing_samples:    int                     = 0
+    sessions_missing_embeddings: int                     = 0
+    sessions_missing_labels:     int                     = 0
+    sessions_missing_calibration:int                     = 0
     per_participant:           Dict[str, PerParticipantStats] = field(default_factory=dict)
 
 
@@ -92,6 +99,11 @@ class DatasetStatsComputer:
         n_labels      = sum(1 for e in entries if e.has_labels)
         n_embeddings  = sum(1 for e in entries if e.has_embeddings)
 
+        n_miss_samples    = sum(1 for e in entries if not e.has_samples)
+        n_miss_embeddings = sum(1 for e in entries if not e.has_embeddings)
+        n_miss_labels     = sum(1 for e in entries if not e.has_labels)
+        n_miss_calib      = sum(1 for e in entries if not e.has_calibration)
+
         # ── Engagement distribution (frame-weighted) ───────────────────────
         eng_totals: Dict[str, float] = {}
         score_weighted = 0.0
@@ -104,12 +116,21 @@ class DatasetStatsComputer:
                 score_weighted += e.mean_engagement_score * e.n_frames
                 frames_for_eng += e.n_frames
 
+        on_screen_weighted = sum(
+            e.on_screen_fraction * e.n_frames for e in entries if e.n_frames > 0
+        )
+        blink_weighted = sum(
+            e.mean_blink_rate * e.n_frames for e in entries if e.n_frames > 0
+        )
+
         eng_dist: Dict[str, float] = {}
         if frames_for_eng > 0:
             eng_dist = {s: v / frames_for_eng for s, v in eng_totals.items()}
-            mean_score = score_weighted / frames_for_eng
+            mean_score      = score_weighted    / frames_for_eng
+            mean_on_screen  = on_screen_weighted / frames_for_eng
+            mean_blink_rate = blink_weighted    / frames_for_eng
         else:
-            mean_score = 0.0
+            mean_score = mean_on_screen = mean_blink_rate = 0.0
 
         # ── Label distribution ─────────────────────────────────────────────
         label_dist: Dict[str, Dict[str, int]] = {}
@@ -145,16 +166,22 @@ class DatasetStatsComputer:
         n_participants = len({e.participant_id for e in entries})
 
         return DatasetStats(
-            n_participants=            n_participants,
-            n_sessions=                len(entries),
-            total_hours=               round(total_duration_s / 3600, 4),
-            total_frames=              total_frames,
-            total_windows=             total_windows,
-            sessions_with_calibration= n_calibration,
-            sessions_with_labels=      n_labels,
-            sessions_with_embeddings=  n_embeddings,
-            label_distribution=        label_dist,
-            engagement_distribution=   {k: round(v, 4) for k, v in eng_dist.items()},
-            mean_engagement_score=     round(mean_score, 4),
-            per_participant=           per_p,
+            n_participants=             n_participants,
+            n_sessions=                 len(entries),
+            total_hours=                round(total_duration_s / 3600, 4),
+            total_frames=               total_frames,
+            total_windows=              total_windows,
+            sessions_with_calibration=  n_calibration,
+            sessions_with_labels=       n_labels,
+            sessions_with_embeddings=   n_embeddings,
+            label_distribution=         label_dist,
+            engagement_distribution=    {k: round(v, 4) for k, v in eng_dist.items()},
+            mean_engagement_score=      round(mean_score, 4),
+            mean_on_screen_fraction=    round(mean_on_screen, 4),
+            mean_blink_rate=            round(mean_blink_rate, 2),
+            sessions_missing_samples=   n_miss_samples,
+            sessions_missing_embeddings=n_miss_embeddings,
+            sessions_missing_labels=    n_miss_labels,
+            sessions_missing_calibration=n_miss_calib,
+            per_participant=            per_p,
         )

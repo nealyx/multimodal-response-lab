@@ -1,16 +1,16 @@
 """Tests for Day 13: multi-session dataset management.
 
 Coverage:
-  TestParticipant       ( 8 tests) — create, save/load, try_load, serialization
-  TestSessionEntry      ( 6 tests) — to_dict/from_dict, is_complete, focused_fraction
-  TestSessionCatalog    ( 6 tests) — add, get, remove, for_participant, len
-  TestDatasetManifest   ( 8 tests) — create, save/load, add_participant/session
-  TestSessionIngestor   (12 tests) — ingest with real tmp files, missing files, flags
-  TestDatasetRegistry   ( 8 tests) — register, ingest, rebuild, query
-  TestDatasetStats      ( 8 tests) — compute stats, label dist, eng dist, per-participant
-  TestDatasetChecker    ( 8 tests) — errors, warnings, info, summary
-  TestDatasetExporter   ( 6 tests) — JSON structure, CSV rows, paths returned
-  Total                 (70 tests)
+  TestParticipant         ( 8 tests) — create, save/load, try_load, serialization
+  TestSessionEntry        ( 7 tests) — to_dict/from_dict, is_complete, new fields
+  TestSessionCatalog      ( 6 tests) — add, get, remove, for_participant, len
+  TestDatasetManifest     ( 8 tests) — create, save/load, add_participant/session
+  TestSessionIngestor     (14 tests) — ingest with real tmp files, on_screen, blink
+  TestDatasetRegistry     (11 tests) — register, ingest, rebuild, directory structure
+  TestDatasetStats        (10 tests) — compute stats, on_screen, blink, missing counts
+  TestDatasetChecker      ( 8 tests) — errors, warnings, info, summary
+  TestDatasetExporter     ( 7 tests) — JSON structure, CSV rows, new columns
+  Total                   (79 tests)
 """
 
 from __future__ import annotations
@@ -37,37 +37,41 @@ from src.dataset.stats import DatasetStats, DatasetStatsComputer
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_entry(
-    session_id:     str = "sess_001",
-    participant_id: str = "p_001",
-    n_frames:       int = 500,
-    n_windows:      int = 20,
-    duration_s:     float = 60.0,
-    has_session_log: bool = True,
-    has_samples:    bool = True,
-    has_embeddings: bool = True,
-    has_labels:     bool = False,
-    has_calibration:bool = False,
-    mean_eng:       float = 0.72,
-    eng_fracs:      dict | None = None,
-    label_summary:  dict | None = None,
+    session_id:       str   = "sess_001",
+    participant_id:   str   = "p_001",
+    n_frames:         int   = 500,
+    n_windows:        int   = 20,
+    duration_s:       float = 60.0,
+    has_session_log:  bool  = True,
+    has_samples:      bool  = True,
+    has_embeddings:   bool  = True,
+    has_labels:       bool  = False,
+    has_calibration:  bool  = False,
+    mean_eng:         float = 0.72,
+    on_screen_frac:   float = 0.85,
+    mean_blink_rate:  float = 15.0,
+    eng_fracs:        dict | None = None,
+    label_summary:    dict | None = None,
 ) -> SessionEntry:
     return SessionEntry(
-        session_id=       session_id,
-        participant_id=   participant_id,
-        ingested_at=      "2026-01-01T00:00:00+00:00",
-        has_session_log=  has_session_log,
-        has_samples=      has_samples,
-        has_embeddings=   has_embeddings,
-        has_labels=       has_labels,
-        has_calibration=  has_calibration,
-        n_frames=         n_frames,
-        n_windows=        n_windows,
-        duration_s=       duration_s,
-        experiment_name=  "test",
+        session_id=            session_id,
+        participant_id=        participant_id,
+        ingested_at=           "2026-01-01T00:00:00+00:00",
+        has_session_log=       has_session_log,
+        has_samples=           has_samples,
+        has_embeddings=        has_embeddings,
+        has_labels=            has_labels,
+        has_calibration=       has_calibration,
+        n_frames=              n_frames,
+        n_windows=             n_windows,
+        duration_s=            duration_s,
+        experiment_name=       "test",
         mean_engagement_score= mean_eng,
-        engagement_fractions= eng_fracs if eng_fracs is not None
-                              else {"focused": 0.6, "distracted": 0.2},
-        label_summary=    label_summary if label_summary is not None else {},
+        on_screen_fraction=    on_screen_frac,
+        mean_blink_rate=       mean_blink_rate,
+        engagement_fractions=  eng_fracs if eng_fracs is not None
+                               else {"focused": 0.6, "distracted": 0.2},
+        label_summary=         label_summary if label_summary is not None else {},
     )
 
 
@@ -88,16 +92,18 @@ def _make_session_dir(tmp_path: Path, session_id: str = "20260101_120000") -> Pa
         json.dumps(session_log), encoding="utf-8"
     )
 
-    # samples.csv (5 rows)
+    # samples.csv (5 rows, includes is_on_screen and blink_rate)
     with open(session_dir / "samples.csv", "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=[
             "frame_index", "timestamp", "engagement_state", "smoothed_score",
+            "is_on_screen", "blink_rate",
         ])
         writer.writeheader()
         for i in range(5):
             writer.writerow({
                 "frame_index": i, "timestamp": 1000.0 + i,
                 "engagement_state": "focused", "smoothed_score": 0.75,
+                "is_on_screen": "True", "blink_rate": "14.0",
             })
 
     return session_dir
@@ -630,3 +636,149 @@ class TestDatasetExporter:
         with open(paths["dataset_summary_csv"], encoding="utf-8") as fh:
             rows = list(csv.DictReader(fh))
         assert rows[0]["session_id"] == "sess_xyz"
+
+    def test_csv_has_on_screen_and_blink_columns(self, tmp_path):
+        entries = [_make_entry("s1", on_screen_frac=0.90, mean_blink_rate=16.5)]
+        m = self._make_manifest_with_entries(entries, tmp_path)
+        stats = DatasetStatsComputer.compute(entries, {})
+        paths = DatasetExporter.export_all(m, stats, [], str(tmp_path / "out"))
+        with open(paths["dataset_summary_csv"], encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        assert "on_screen_fraction" in rows[0]
+        assert "mean_blink_rate"    in rows[0]
+        assert float(rows[0]["on_screen_fraction"]) == pytest.approx(0.90)
+
+    def test_json_summary_has_missing_data_block(self, tmp_path):
+        entries = [_make_entry("s1", has_labels=False, has_calibration=False)]
+        m = self._make_manifest_with_entries(entries, tmp_path)
+        stats = DatasetStatsComputer.compute(entries, {})
+        paths = DatasetExporter.export_all(m, stats, [], str(tmp_path / "out"))
+        doc = json.loads(Path(paths["dataset_summary_json"]).read_text())
+        assert "missing_data" in doc["summary"]
+        assert doc["summary"]["missing_data"]["no_labels"] == 1
+
+
+# ── TestDirectoryStructure ────────────────────────────────────────────────────
+
+class TestDirectoryStructure:
+    """Verify the physical participants/ directory hierarchy is created."""
+
+    def test_register_creates_participant_dir(self, tmp_path):
+        reg = DatasetRegistry(str(tmp_path / "ds"))
+        reg.register_participant(participant_id="participant_001")
+        assert (tmp_path / "ds" / "participants" / "participant_001").is_dir()
+
+    def test_register_creates_profile_json(self, tmp_path):
+        reg = DatasetRegistry(str(tmp_path / "ds"))
+        reg.register_participant(participant_id="participant_001", notes="test")
+        profile_path = tmp_path / "ds" / "participants" / "participant_001" / "profile.json"
+        assert profile_path.exists()
+        doc = json.loads(profile_path.read_text())
+        assert doc["participant_id"] == "participant_001"
+        assert doc["notes"] == "test"
+
+    def test_register_creates_calibration_subdir(self, tmp_path):
+        reg = DatasetRegistry(str(tmp_path / "ds"))
+        reg.register_participant(participant_id="p1")
+        assert (tmp_path / "ds" / "participants" / "p1" / "calibration").is_dir()
+
+    def test_register_creates_sessions_subdir(self, tmp_path):
+        reg = DatasetRegistry(str(tmp_path / "ds"))
+        reg.register_participant(participant_id="p1")
+        assert (tmp_path / "ds" / "participants" / "p1" / "sessions").is_dir()
+
+    def test_ingest_creates_session_entry_json(self, tmp_path):
+        session_dir = _make_session_dir(tmp_path)
+        reg = DatasetRegistry(str(tmp_path / "ds"))
+        reg.register_participant(participant_id="p1")
+        entry = reg.ingest_session(str(session_dir), "p1")
+        session_entry_path = (
+            tmp_path / "ds" / "participants" / "p1"
+            / "sessions" / entry.session_id / "session_entry.json"
+        )
+        assert session_entry_path.exists()
+
+    def test_session_entry_json_contains_session_id(self, tmp_path):
+        session_dir = _make_session_dir(tmp_path)
+        reg = DatasetRegistry(str(tmp_path / "ds"))
+        reg.register_participant(participant_id="p1")
+        entry = reg.ingest_session(str(session_dir), "p1")
+        session_entry_path = (
+            tmp_path / "ds" / "participants" / "p1"
+            / "sessions" / entry.session_id / "session_entry.json"
+        )
+        doc = json.loads(session_entry_path.read_text())
+        assert doc["session_id"] == entry.session_id
+        assert doc["participant_id"] == "p1"
+
+    def test_dataset_manifest_at_root(self, tmp_path):
+        reg = DatasetRegistry(str(tmp_path / "ds"))
+        assert (tmp_path / "ds" / "dataset_manifest.json").exists()
+
+
+# ── TestOnScreenAndBlink ──────────────────────────────────────────────────────
+
+class TestOnScreenAndBlink:
+    """Verify on_screen_fraction and mean_blink_rate flow from CSV → stats."""
+
+    def test_ingestor_computes_on_screen_fraction(self, tmp_path):
+        session_dir = _make_session_dir(tmp_path)  # all 5 rows have is_on_screen=True
+        entry = SessionIngestor.ingest(str(session_dir), "p1")
+        assert entry.on_screen_fraction == pytest.approx(1.0)
+
+    def test_ingestor_computes_mean_blink_rate(self, tmp_path):
+        session_dir = _make_session_dir(tmp_path)  # all 5 rows have blink_rate=14.0
+        entry = SessionIngestor.ingest(str(session_dir), "p1")
+        assert entry.mean_blink_rate == pytest.approx(14.0)
+
+    def test_on_screen_fraction_partial(self, tmp_path):
+        session_dir = tmp_path / "mixed_sess"
+        session_dir.mkdir()
+        (session_dir / "session_log.json").write_text(json.dumps({
+            "session_id": "mixed", "experiment_name": "x",
+            "start_ts": 0.0, "end_ts": 10.0, "config": {},
+        }))
+        with open(session_dir / "samples.csv", "w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=[
+                "frame_index", "timestamp", "engagement_state",
+                "smoothed_score", "is_on_screen", "blink_rate",
+            ])
+            writer.writeheader()
+            for i in range(4):
+                writer.writerow({
+                    "frame_index": i, "timestamp": float(i),
+                    "engagement_state": "focused", "smoothed_score": "0.7",
+                    "is_on_screen": "True" if i < 2 else "False",
+                    "blink_rate": "10.0",
+                })
+        entry = SessionIngestor.ingest(str(session_dir), "p1")
+        assert entry.on_screen_fraction == pytest.approx(0.5)
+
+    def test_stats_mean_on_screen_weighted(self):
+        entries = [
+            _make_entry("s1", n_frames=100, on_screen_frac=1.0),
+            _make_entry("s2", n_frames=100, on_screen_frac=0.0),
+        ]
+        stats = DatasetStatsComputer.compute(entries, {})
+        assert stats.mean_on_screen_fraction == pytest.approx(0.5)
+
+    def test_stats_mean_blink_rate_weighted(self):
+        entries = [
+            _make_entry("s1", n_frames=100, mean_blink_rate=10.0),
+            _make_entry("s2", n_frames=100, mean_blink_rate=20.0),
+        ]
+        stats = DatasetStatsComputer.compute(entries, {})
+        assert stats.mean_blink_rate == pytest.approx(15.0)
+
+    def test_stats_missing_counts(self):
+        entries = [
+            _make_entry("s1", has_samples=True,  has_embeddings=False,
+                        has_labels=False, has_calibration=False),
+            _make_entry("s2", has_samples=False, has_embeddings=True,
+                        has_labels=True,  has_calibration=True),
+        ]
+        stats = DatasetStatsComputer.compute(entries, {})
+        assert stats.sessions_missing_samples    == 1
+        assert stats.sessions_missing_embeddings == 1
+        assert stats.sessions_missing_labels     == 1
+        assert stats.sessions_missing_calibration == 1

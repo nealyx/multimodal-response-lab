@@ -77,9 +77,8 @@ class SessionIngestor:
 
         # ── Samples.csv ───────────────────────────────────────────────────────
         samples_path_str = str(session_path / "samples.csv")
-        has_samples, n_frames, eng_fracs, mean_eng = cls._read_samples(
-            samples_path_str, quality_issues
-        )
+        has_samples, n_frames, eng_fracs, mean_eng, on_screen_frac, mean_blink = \
+            cls._read_samples(samples_path_str, quality_issues)
 
         # ── Embeddings ────────────────────────────────────────────────────────
         if embeddings_path is None:
@@ -117,9 +116,11 @@ class SessionIngestor:
             duration_s=       duration_s,
             experiment_name=  experiment_name,
             recorded_at=      recorded_at,
-            engagement_fractions= eng_fracs,
+            engagement_fractions=  eng_fracs,
             mean_engagement_score= mean_eng,
-            label_summary=    label_summary,
+            on_screen_fraction=    on_screen_frac,
+            mean_blink_rate=       mean_blink,
+            label_summary=         label_summary,
             session_dir=      str(session_path.resolve()),
             samples_path=     samples_path_str,
             embeddings_path=  str(embeddings_path) if embeddings_path else "",
@@ -177,15 +178,17 @@ class SessionIngestor:
 
     @staticmethod
     def _read_samples(samples_path: str, issues: list):
-        """Return (has_samples, n_frames, eng_fracs, mean_eng)."""
+        """Return (has_samples, n_frames, eng_fracs, mean_eng, on_screen_frac, mean_blink)."""
         p = Path(samples_path)
         if not p.exists():
             issues.append(f"WARNING samples.csv not found: {samples_path}")
-            return False, 0, {}, 0.0
+            return False, 0, {}, 0.0, 0.0, 0.0
 
         state_counts: Dict[str, int] = {}
-        score_sum = 0.0
-        n = 0
+        score_sum   = 0.0
+        on_screen_n = 0
+        blink_sum   = 0.0
+        n           = 0
 
         try:
             with open(p, encoding="utf-8", newline="") as fh:
@@ -198,17 +201,28 @@ class SessionIngestor:
                         score_sum += float(row.get("smoothed_score", "0.0"))
                     except ValueError:
                         pass
+                    # on_screen
+                    on_screen_raw = row.get("is_on_screen", "false")
+                    if str(on_screen_raw).strip().lower() in ("true", "1", "yes"):
+                        on_screen_n += 1
+                    # blink rate
+                    try:
+                        blink_sum += float(row.get("blink_rate", "0.0"))
+                    except ValueError:
+                        pass
         except OSError as exc:
             issues.append(f"ERROR reading samples.csv: {exc}")
-            return False, 0, {}, 0.0
+            return False, 0, {}, 0.0, 0.0, 0.0
 
         if n == 0:
             issues.append("WARNING samples.csv is empty")
-            return True, 0, {}, 0.0
+            return True, 0, {}, 0.0, 0.0, 0.0
 
-        eng_fracs = {state: cnt / n for state, cnt in state_counts.items()}
-        mean_eng  = score_sum / n
-        return True, n, eng_fracs, round(mean_eng, 4)
+        eng_fracs       = {state: cnt / n for state, cnt in state_counts.items()}
+        mean_eng        = score_sum / n
+        on_screen_frac  = on_screen_n / n
+        mean_blink      = blink_sum / n
+        return True, n, eng_fracs, round(mean_eng, 4), round(on_screen_frac, 4), round(mean_blink, 2)
 
     @staticmethod
     def _count_embeddings(embeddings_path: str, issues: list):

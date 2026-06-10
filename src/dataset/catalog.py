@@ -74,6 +74,8 @@ class SessionEntry:
     # Signal aggregates (from samples.csv)
     engagement_fractions: Dict[str, float] = field(default_factory=dict)
     mean_engagement_score: float           = 0.0
+    on_screen_fraction:    float           = 0.0   # fraction of frames is_on_screen=True
+    mean_blink_rate:       float           = 0.0   # mean blink_rate_per_min over session
 
     # Label summary (from labels.json)
     label_summary: Dict[str, Optional[str]] = field(default_factory=dict)
@@ -124,6 +126,8 @@ class SessionEntry:
             "experiment_name":  self.experiment_name,
             "recorded_at":      self.recorded_at,
             "mean_engagement_score": self.mean_engagement_score,
+            "on_screen_fraction":    self.on_screen_fraction,
+            "mean_blink_rate":       self.mean_blink_rate,
             "engagement_fractions": dict(self.engagement_fractions),
             "label_summary":    {k: v for k, v in self.label_summary.items()},
             "session_dir":      self.session_dir,
@@ -152,6 +156,8 @@ class SessionEntry:
             experiment_name=  d.get("experiment_name", ""),
             recorded_at=      d.get("recorded_at", ""),
             mean_engagement_score= float(d.get("mean_engagement_score", 0.0)),
+            on_screen_fraction=    float(d.get("on_screen_fraction",    0.0)),
+            mean_blink_rate=       float(d.get("mean_blink_rate",       0.0)),
             engagement_fractions= dict(d.get("engagement_fractions", {})),
             label_summary=    {k: v for k, v in d.get("label_summary", {}).items()},
             session_dir=      d.get("session_dir",      ""),

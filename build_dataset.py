@@ -156,6 +156,13 @@ def cmd_stats(args: argparse.Namespace) -> None:
     print(f"  With labels      : {stats.sessions_with_labels}")
     print(f"  With embeddings  : {stats.sessions_with_embeddings}")
     print(f"  Mean eng. score  : {stats.mean_engagement_score:.3f}")
+    print(f"  Mean on-screen   : {stats.mean_on_screen_fraction:.1%}")
+    print(f"  Mean blink rate  : {stats.mean_blink_rate:.1f} /min")
+    print(f"\n  Missing data:")
+    print(f"    No samples      : {stats.sessions_missing_samples}")
+    print(f"    No embeddings   : {stats.sessions_missing_embeddings}")
+    print(f"    No labels       : {stats.sessions_missing_labels}")
+    print(f"    No calibration  : {stats.sessions_missing_calibration}")
 
     if stats.engagement_distribution:
         print(f"\n  Engagement distribution (frame-weighted):")
