@@ -80,6 +80,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.calibration.baseline import UserProfile
+from src.calibration.comparison import BaselineComparator
 from src.reporting.charts import generate_all, figure_to_png_bytes
 from src.reporting.html_report import generate_html
 from src.reporting.loader import load_session_dir, load_session_json
@@ -162,6 +164,24 @@ def _write_timeline_csv(session_log, out_dir: Path) -> Path:
     return path
 
 
+def _print_baseline_comparison(metrics, profile: UserProfile, session_dir: str) -> None:
+    """Print a z-score comparison of session signals against the user's profile."""
+    e = metrics.engagement
+    b = metrics.blink
+
+    comparison = BaselineComparator.compare(
+        profile,
+        session_dir=session_dir,
+        blink_rate=       b.blink_rate_summary.mean if b.blink_rate_summary else None,
+        engagement_score= e.score_summary.mean      if e.score_summary else None,
+    )
+
+    print(f"\n── Baseline Comparison  [profile: {profile.profile_id}] ──────────────────────")
+    for line in comparison.summary_lines():
+        print(line)
+    print("────────────────────────────────────────────────────────────────────")
+
+
 def _print_summary(metrics) -> None:
     e = metrics.engagement
     g = metrics.gaze
@@ -210,6 +230,14 @@ def run(args: argparse.Namespace) -> None:
     metrics  = reporter.compute(session_log)
 
     _print_summary(metrics)
+
+    # ── Baseline comparison (optional) ────────────────────────────────────
+    profile_path = getattr(args, "profile", None)
+    profile = UserProfile.try_load(profile_path)
+    if profile is not None:
+        _print_baseline_comparison(metrics, profile, str(args.input))
+    elif profile_path:
+        log.warning("Could not load profile from %s — skipping baseline comparison", profile_path)
 
     # ── Output directory ──────────────────────────────────────────────────
     out_dir = Path(args.output_dir) / session_log.session_id
@@ -287,6 +315,12 @@ def main() -> None:
     parser.add_argument("--no-charts", action="store_true", help="Skip chart generation")
     parser.add_argument("--no-html",   action="store_true", help="Skip HTML report")
     parser.add_argument("--open",      action="store_true", help="Open HTML report in browser")
+    parser.add_argument(
+        "--profile", metavar="USER_PROFILE_JSON",
+        help="Path to a user_profile.json from run_calibration.py. "
+             "When provided, prints a z-score comparison of session signals "
+             "against the personal baseline.",
+    )
     args = parser.parse_args()
     run(args)
 

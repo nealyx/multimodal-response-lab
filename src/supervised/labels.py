@@ -26,12 +26,17 @@ How to move toward real ground truth:
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from src.embedding.features import BehavioralWindow, FEATURE_NAMES
+
+log = logging.getLogger(__name__)
 
 
 # ── Label configuration ───────────────────────────────────────────────────────
@@ -181,6 +186,79 @@ def assign_labels(
         label_list.append(label)
 
     return kept_windows, np.array(label_list, dtype=np.int64), config.classes, excluded
+
+
+def load_human_label_windows(
+    windows:     List[BehavioralWindow],
+    label_paths: List[str],
+    task:        str,
+) -> Tuple[List[BehavioralWindow], np.ndarray, List[str], int]:
+    """Assign human-survey labels to windows using SessionLabel files.
+
+    Labels are session-level: every window from session *X* receives the same
+    label derived from the survey rating for session *X*.  Ambiguous labels
+    (None) exclude all windows from that session.
+
+    Parameters
+    ----------
+    windows     : all BehavioralWindows from one or more sessions
+    label_paths : paths to ``labels.json`` files produced by ``run_calibration.py``
+    task        : one of "engagement", "fatigue", "distraction"
+
+    Returns
+    -------
+    kept_windows, labels, label_names, excluded_count
+        Same contract as ``assign_labels`` so the trainer pipeline can use either
+        source identically.
+    """
+    from src.calibration.labeler import SessionLabel
+
+    # Load all label files
+    session_labels: Dict[str, Optional[str]] = {}
+    for p in label_paths:
+        sl = SessionLabel.try_load(p)
+        if sl is None:
+            log.warning("Could not load label file: %s", p)
+            continue
+        class_label = sl.label_for(task)
+        # Use the session_dir as the key so we can match windows by session_id
+        session_labels[sl.session_dir] = class_label
+        log.info("Loaded human label for '%s': %s → %s", sl.session_dir, task, class_label)
+
+    if not session_labels:
+        log.warning("No human label files loaded for task '%s'", task)
+        return [], np.array([], dtype=np.int64), ["low", "high"], 0
+
+    label_names = ["low", "high"]
+
+    kept: List[BehavioralWindow] = []
+    label_list: List[int] = []
+    excluded = 0
+
+    for w in windows:
+        # Match window to a session label by session_id substring match
+        matched_label: Optional[str] = None
+        for sess_dir, cls in session_labels.items():
+            if w.session_id and (
+                w.session_id in sess_dir or sess_dir.endswith(w.session_id)
+            ):
+                matched_label = cls
+                break
+
+        if matched_label is None:
+            excluded += 1
+            continue
+        if matched_label == "HIGH":
+            kept.append(w)
+            label_list.append(1)
+        elif matched_label == "LOW":
+            kept.append(w)
+            label_list.append(0)
+        else:
+            # Ambiguous middle (None)
+            excluded += 1
+
+    return kept, np.array(label_list, dtype=np.int64), label_names, excluded
 
 
 def _label_one(

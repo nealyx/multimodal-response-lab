@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Supervised behavioral prediction — Day 11.
+"""Supervised behavioral prediction — Day 11/12.
 
 Loads one or more behavioral_windows.csv files (from embed_session.py),
-assigns heuristic labels, trains baseline classifiers, and writes model
-artifacts alongside evaluation metrics.
+assigns labels (heuristic or human-survey), trains baseline classifiers, and
+writes model artifacts alongside evaluation metrics.
 
-Why heuristic labels are not ground truth
-------------------------------------------
-Labels are derived from the same signals used as features (e.g., "high
-attention" is defined as engagement_mean > 0.65, and engagement_mean is
-feature 0).  The model therefore learns to reproduce the labeling rule, not
-to predict an independent measure of cognition.  This is useful for validating
-the pipeline and identifying discriminative features, but cannot be presented
-as evidence of accurate cognitive state inference.
+Label sources
+-------------
+  heuristic  (default) : Rules derived from the same signals used as features.
+                         Circular — the model reproduces the formula, not an
+                         independent cognitive state.  Good for pipeline
+                         validation; not evidence of real inference.
+  human                : Post-session survey ratings (engagement/fatigue/
+                         distraction) collected via run_calibration.py.
+                         Independent of the signals; less circular.
+                         Requires --labels pointing to one or more labels.json
+                         files and --task matching a survey task name
+                         (engagement, fatigue, distraction).
 
 Why metrics on a single session can mislead
 --------------------------------------------
@@ -23,11 +27,14 @@ temporal hold-out for reliable estimates.
 
 Usage
 -----
+    # Heuristic labels (default)
     python train_behavior_model.py outputs/embeddings/<session_id>/behavioral_windows.csv
-    python train_behavior_model.py embeddings/s1/behavioral_windows.csv embeddings/s2/behavioral_windows.csv
     python train_behavior_model.py <csv> --task focused_vs_distracted --models random_forest
-    python train_behavior_model.py <csv> --task high_vs_low_attention --split temporal
     python train_behavior_model.py <csv> --list-tasks
+
+    # Human-survey labels
+    python train_behavior_model.py <csv> --label-source human \\
+        --labels outputs/sessions/<sid>/labels.json --task engagement
 
 Output layout
 -------------
@@ -53,7 +60,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.supervised.dataset import build_dataset, load_windows_multi
 from src.supervised.evaluator import evaluate
 from src.supervised.exporter import ModelExporter
-from src.supervised.labels import BUILTIN_TASKS
+from src.supervised.labels import BUILTIN_TASKS, load_human_label_windows
 from src.supervised.trainer import BehaviorModelTrainer, MODEL_FACTORIES
 
 logging.basicConfig(
@@ -115,17 +122,66 @@ def run(args: argparse.Namespace) -> None:
         print("No windows loaded. Run embed_session.py first.")
         sys.exit(1)
 
-    # ── Build label config ────────────────────────────────────────────────
-    task_name = args.task
-    if task_name not in BUILTIN_TASKS:
-        print(f"Unknown task '{task_name}'. Use --list-tasks to see options.")
-        sys.exit(1)
+    label_source = getattr(args, "label_source", "heuristic")
+    task_name    = args.task
 
-    config = BUILTIN_TASKS[task_name]()
-    log.info("Task: %s  |  Classes: %s", config.task, config.classes)
+    if label_source == "human":
+        # ── Human-survey labels ───────────────────────────────────────────
+        human_tasks = ("engagement", "fatigue", "distraction")
+        if task_name not in human_tasks:
+            print(
+                f"--label-source human requires --task in {human_tasks}, "
+                f"got '{task_name}'."
+            )
+            sys.exit(1)
+        label_files = getattr(args, "labels", None) or []
+        if not label_files:
+            print("--label-source human requires --labels <path(s) to labels.json>.")
+            sys.exit(1)
 
-    # ── Build dataset ─────────────────────────────────────────────────────
-    dataset = build_dataset(windows, config)
+        kept, labels_arr, label_names, excluded = load_human_label_windows(
+            windows, label_files, task_name
+        )
+        log.info(
+            "Human labels: %d kept, %d excluded  |  classes: %s",
+            len(kept), excluded, label_names,
+        )
+        if len(kept) < 4:
+            print(
+                f"\nOnly {len(kept)} labeled windows for task '{task_name}' "
+                "with human labels.\n"
+                "Check that the session IDs in your labels.json match the CSV filenames."
+            )
+            sys.exit(1)
+
+        # Build a pseudo-LabelConfig so the rest of the pipeline is unchanged
+        from src.supervised.labels import LabelConfig
+        config = LabelConfig(
+            task=      task_name,
+            label_type="binary",
+            classes=   label_names,
+        )
+        dataset = build_dataset(kept, config)
+        # Overwrite the labels with the human ones (build_dataset assigns heuristic)
+        dataset = dataset.__class__(
+            X=             dataset.X,
+            y=             labels_arr,
+            feature_names= dataset.feature_names,
+            label_names=   label_names,
+            task=          task_name,
+            n_excluded=    excluded,
+            session_ids=   dataset.session_ids,
+            window_ids=    dataset.window_ids,
+        )
+
+    else:
+        # ── Heuristic labels (default) ────────────────────────────────────
+        if task_name not in BUILTIN_TASKS:
+            print(f"Unknown task '{task_name}'. Use --list-tasks to see options.")
+            sys.exit(1)
+        config = BUILTIN_TASKS[task_name]()
+        log.info("Task: %s  |  Classes: %s", config.task, config.classes)
+        dataset = build_dataset(windows, config)
     log.info(
         "Dataset: %d samples  |  excluded: %d  |  class counts: %s",
         dataset.n_samples,
@@ -133,7 +189,7 @@ def run(args: argparse.Namespace) -> None:
         dataset.class_counts,
     )
 
-    if dataset.n_samples < 4:
+    if label_source == "heuristic" and dataset.n_samples < 4:
         print(
             f"\nOnly {dataset.n_samples} labeled samples for task '{task_name}'.\n"
             "Record a longer session or choose a different task.\n"
@@ -204,6 +260,15 @@ def main() -> None:
     parser.add_argument(
         "--seed", type=int, default=42,
         help="Random seed for reproducibility (default: 42)",
+    )
+    parser.add_argument(
+        "--label-source", choices=["heuristic", "human"], default="heuristic",
+        help="Label source: 'heuristic' (default) or 'human' (survey ratings from "
+             "run_calibration.py). Human labels require --labels and a survey task.",
+    )
+    parser.add_argument(
+        "--labels", nargs="+", metavar="LABELS_JSON",
+        help="Path(s) to labels.json files (required when --label-source human).",
     )
     args = parser.parse_args()
     run(args)
