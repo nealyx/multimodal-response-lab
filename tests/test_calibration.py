@@ -424,3 +424,32 @@ class TestComparison:
             blink_rate=None,  # excluded
         )
         assert "blink_rate" not in cmp.deltas
+
+
+class TestRunCalibrationImports:
+    """Regression test: run_calibration.py must import cleanly with the current API."""
+
+    def test_module_imports_cleanly(self):
+        import importlib
+        import run_calibration
+        importlib.reload(run_calibration)
+        assert hasattr(run_calibration, "run_webcam_calibration")
+        assert hasattr(run_calibration, "run_survey_mode")
+
+    def test_no_stale_engagement_scorer_import(self):
+        import ast, pathlib
+        src = pathlib.Path("run_calibration.py").read_text()
+        assert "EngagementScorer" not in src
+        assert "EyeMetricExtractor" not in src
+        assert "GazeAnalyzer" not in src
+        assert "HeadPoseEstimator" not in src
+
+    def test_correct_api_references_present(self):
+        import pathlib
+        src = pathlib.Path("run_calibration.py").read_text()
+        assert "AttentionScorer" in src
+        assert "AttentionDetector" in src
+        assert "extract_eye_measurements" in src
+        assert "GazeDetector" in src
+        assert "build_camera_matrix" in src
+        assert "estimate_head_pose" in src

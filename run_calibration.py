@@ -107,11 +107,12 @@ def run_webcam_calibration(
     import yaml
     from src.calibration.collector import CalibrationCollector, CalibrationSample
     from src.calibration.profiler import CalibrationProfiler
+    from src.signals.attention import AttentionDetector
     from src.signals.blink_detector import BlinkDetector
-    from src.signals.engagement import EngagementScorer
-    from src.signals.eye_metrics import EyeMetricExtractor
-    from src.signals.gaze import GazeAnalyzer
-    from src.signals.head_pose import HeadPoseEstimator
+    from src.signals.engagement import AttentionScorer
+    from src.signals.eye_metrics import extract_eye_measurements
+    from src.signals.gaze import GazeDetector, extract_gaze_measurements
+    from src.signals.head_pose import build_camera_matrix, estimate_head_pose
 
     try:
         import mediapipe as mp
@@ -129,11 +130,12 @@ def run_webcam_calibration(
         cfg = {}
 
     # ── Set up signal components ──────────────────────────────────────────
-    eye_extractor   = EyeMetricExtractor(cfg)
-    blink_detector  = BlinkDetector(cfg)
-    gaze_analyzer   = GazeAnalyzer(cfg)
-    head_estimator  = HeadPoseEstimator(cfg)
-    engagement_scorer = EngagementScorer(cfg)
+    signals_cfg      = cfg.get("signals", cfg)
+    focal_scale      = float(cfg.get("head_pose", {}).get("focal_scale", 1.0))
+    blink_detector   = BlinkDetector(signals_cfg)
+    attention_det    = AttentionDetector(cfg)
+    gaze_detector    = GazeDetector(cfg)
+    attention_scorer = AttentionScorer(cfg)
 
     collector = CalibrationCollector()
 
@@ -156,6 +158,8 @@ def run_webcam_calibration(
     start_ts      = time.monotonic()
     phase         = "warmup"
     total_s       = warmup_s + duration_s
+    cam_matrix    = None
+    frame_idx     = 0
 
     print()
     print("=" * 60)
@@ -224,37 +228,62 @@ def run_webcam_calibration(
 
             if face_detected:
                 lm = results.multi_face_landmarks[0]
-                try:
-                    eye_m = eye_extractor.extract(lm, frame.shape)
-                    blink_a = blink_detector.update(eye_m)
-                    ear        = float(eye_m.mean_ear)
-                    blink_rate = float(blink_a.blink_rate_per_min)
+
+                if cam_matrix is None:
+                    cam_matrix = build_camera_matrix(w, h, focal_scale=focal_scale)
+
+                eye_m = extract_eye_measurements(
+                    lm, w, h, timestamp=now, frame_index=frame_idx, cfg=signals_cfg,
+                )
+                blink_a = (
+                    blink_detector.update(eye_m) if eye_m is not None
+                    else blink_detector.no_face_update()
+                )
+                if eye_m is not None:
+                    ear = float(eye_m.mean_ear)
                     is_eyes_open = ear >= cfg.get("blink", {}).get("ear_close_threshold", 0.20)
-                except Exception:
-                    pass
+                if blink_a is not None:
+                    blink_rate = float(blink_a.blink_rate_per_min)
 
-                try:
-                    gaze_r = gaze_analyzer.analyze(lm, frame.shape)
-                    gaze_h = float(gaze_r.h_ratio)
-                    gaze_v = float(gaze_r.v_ratio)
-                except Exception:
-                    pass
+                pose = estimate_head_pose(
+                    lm, w, h, cam_matrix, timestamp=now, frame_index=frame_idx,
+                )
+                att_a = (
+                    attention_det.update(pose) if pose is not None
+                    else attention_det.no_pose_update()
+                )
+                if pose is not None:
+                    head_yaw   = float(pose.yaw)
+                    head_pitch = float(pose.pitch)
 
-                try:
-                    pose_r = head_estimator.estimate(lm, frame.shape)
-                    head_yaw   = float(pose_r.yaw)
-                    head_pitch = float(pose_r.pitch)
-                except Exception:
-                    pass
-
-                try:
-                    from src.signals.eye_metrics import EyeMeasurement
-                    eng_r = engagement_scorer.update(
-                        eye_m, blink_a, gaze_r, pose_r, now
+                gaze_m = extract_gaze_measurements(
+                    lm, w, h,
+                    mean_ear=eye_m.mean_ear if eye_m is not None else 0.0,
+                    timestamp=now, frame_index=frame_idx, cfg=cfg.get("gaze"),
+                )
+                if gaze_m is not None:
+                    gaze_a = gaze_detector.update(
+                        gaze_m,
+                        head_zone=(att_a.zone.value if att_a is not None else None),
+                        head_yaw=(pose.yaw if pose is not None else None),
+                        head_pitch=(pose.pitch if pose is not None else None),
                     )
-                    eng_score = float(eng_r.smoothed_score)
-                except Exception:
-                    pass
+                    gaze_h = float(gaze_a.h_ratio)
+                    gaze_v = float(gaze_a.v_ratio)
+                else:
+                    gaze_a = gaze_detector.no_gaze_update()
+
+                eng = attention_scorer.update(
+                    blink=blink_a,
+                    head=att_a,
+                    gaze=gaze_a,
+                    face_detected=True,
+                    timestamp=now,
+                    frame_index=frame_idx,
+                )
+                eng_score = float(eng.smoothed_score)
+
+            frame_idx += 1
 
             # ── Collect sample (only during recording phase) ──────────────
             if phase == "recording" and face_detected:
