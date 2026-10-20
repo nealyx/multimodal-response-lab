@@ -69,12 +69,12 @@ def _write_metrics_json(metrics, out_dir: Path) -> Path:
     return path
 
 
-def _write_timeline_csv(session_log, out_dir: Path) -> Path:
+def _write_timeline_csv(session_log, out_dir: Path) -> Path | None:
     """Write a timeline CSV with relative timestamps (seconds from session start)."""
     path = out_dir / "timeline.csv"
     if not session_log.samples:
         log.warning("No samples to write timeline from")
-        return path
+        return None
 
     start = session_log.start_ts
     fields = [
@@ -113,6 +113,9 @@ def _write_timeline_csv(session_log, out_dir: Path) -> Path:
 
 def _print_baseline_comparison(metrics, profile: UserProfile, session_dir: str) -> None:
     """Print a z-score comparison of session signals against the user's profile."""
+    if metrics.n_frames == 0:
+        print("\n  Baseline comparison: unavailable — no samples loaded.")
+        return
     e = metrics.engagement
     b = metrics.blink
 
@@ -134,24 +137,29 @@ def _print_summary(metrics) -> None:
     g = metrics.gaze
     b = metrics.blink
 
-    dur = f"{metrics.duration_s:.1f} s" if metrics.duration_s else "unknown"
+    dur = f"{metrics.duration_s:.1f} s" if metrics.duration_s is not None else "unknown"
     print(f"\n── Session  [{metrics.session_id}] ─────────────────────────────────────")
     print(f"  Experiment      : {metrics.experiment_name}")
     print(f"  Duration        : {dur}  ({metrics.n_frames} frames)")
     print(f"  Trials / Resp.  : {metrics.n_trials} / {metrics.n_responses}")
-    print(f"  Engagement score: {e.score_summary.mean:.3f} ± {e.score_summary.std:.3f}")
-    print(f"  Focused         : {e.focused_fraction*100:.1f}%")
-    print(f"  Drifting        : {e.drifting_fraction*100:.1f}%")
-    print(f"  Distracted      : {e.distracted_fraction*100:.1f}%")
-    print(f"  Fatigued        : {e.fatigued_fraction*100:.1f}%")
-    print(f"  Unreliable      : {e.unreliable_fraction*100:.1f}%")
-    print(f"  On-screen       : {g.on_screen_fraction*100:.1f}%")
-    print(f"  Blink rate      : {b.blink_rate_summary.mean:.1f} ± {b.blink_rate_summary.std:.1f} /min")
+    if metrics.n_frames > 0:
+        print(f"  Engagement score: {e.score_summary.mean:.3f} ± {e.score_summary.std:.3f}")
+        print(f"  Focused         : {e.focused_fraction*100:.1f}%")
+        print(f"  Drifting        : {e.drifting_fraction*100:.1f}%")
+        print(f"  Distracted      : {e.distracted_fraction*100:.1f}%")
+        print(f"  Fatigued        : {e.fatigued_fraction*100:.1f}%")
+        print(f"  Unreliable      : {e.unreliable_fraction*100:.1f}%")
+        print(f"  On-screen       : {g.on_screen_fraction*100:.1f}%")
+        print(f"  Blink rate      : {b.blink_rate_summary.mean:.1f} ± {b.blink_rate_summary.std:.1f} /min")
+    else:
+        print("  Sample metrics  : unavailable — no samples loaded.")
+        print("  Load a session directory with samples.csv for signal summaries.")
     if metrics.stimulus_types:
         print("  Per-type:")
         for stype, st in sorted(metrics.stimulus_types.items()):
-            lat = f"{st.mean_latency_ms:.0f} ms" if st.mean_latency_ms else "—"
-            print(f"    {stype:<22} n={st.n_trials}  hit={st.hit_rate*100:.0f}%  RT={lat}  Δscore={st.score_delta:+.3f}")
+            lat = f"{st.mean_latency_ms:.0f} ms" if st.mean_latency_ms is not None else "—"
+            delta = f"{st.score_delta:+.3f}" if metrics.n_frames > 0 else "unavailable"
+            print(f"    {stype:<22} n={st.n_trials}  hit={st.hit_rate*100:.0f}%  RT={lat}  Δscore={delta}")
     if metrics.reaction_latencies_ms:
         import statistics
         lats = metrics.reaction_latencies_ms
@@ -204,7 +212,8 @@ def run(args: argparse.Namespace) -> None:
 
     # ── Timeline CSV ──────────────────────────────────────────────────────
     p = _write_timeline_csv(session_log, out_dir)
-    log.info("Timeline CSV → %s", p)
+    if p is not None:
+        log.info("Timeline CSV → %s", p)
 
     # ── Charts ────────────────────────────────────────────────────────────
     chart_pngs: dict = {}

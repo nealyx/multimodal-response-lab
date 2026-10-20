@@ -69,14 +69,11 @@ def generate_html(
     trial_table: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Render a complete self-contained HTML report."""
-    dom_state = _dominant_state(metrics.engagement)
-    badge_cls = f"badge badge-{dom_state}"
-
     overview_cards = _overview_cards(metrics)
     engagement_section = _engagement_section(metrics)
     signal_section     = _signal_section(metrics)
     stimulus_section   = _stimulus_section(metrics)
-    trial_section      = _trial_table(trial_table or [])
+    trial_section      = _trial_table(trial_table or [], samples_available=metrics.n_frames > 0)
     charts_section     = _charts_section(chart_pngs)
     synthetic_notice = ""
     if metrics.config_snapshot.get("provenance", {}).get("synthetic") is True:
@@ -85,6 +82,15 @@ def generate_html(
   <strong>SYNTHETIC DEMONSTRATION — no participant recording.</strong>
   Signal inputs, events, and response latencies were scripted to exercise the
   software. These figures do not measure a person's behavior or model accuracy.
+</div>"""
+    sample_notice = ""
+    if metrics.n_frames == 0:
+        sample_notice = """
+<div class="limitation">
+  <strong>No samples loaded.</strong> Sample-based scores, state labels, signal
+  summaries, and score comparisons are unavailable. Analyze the session directory
+  with its samples.csv to include them. Recorded event counts and latencies
+  remain available independently.
 </div>"""
 
     return f"""<!DOCTYPE html>
@@ -104,6 +110,7 @@ def generate_html(
   Generated {metrics.generated_at[:19].replace("T", " ")} UTC
 </p>
 {synthetic_notice}
+{sample_notice}
 <p class="subtitle">
   State names such as focused, distracted, and fatigued are heuristic software
   labels, not measured cognition, emotion, attention, or health.
@@ -141,10 +148,17 @@ def generate_html(
 # ── Section builders ──────────────────────────────────────────────────────────
 
 def _overview_cards(m: SessionMetrics) -> str:
-    dur  = f"{m.duration_s:.1f}" if m.duration_s else "—"
-    dom  = _dominant_state(m.engagement)
-    foc  = f"{m.engagement.focused_fraction * 100:.1f}"
-    on_s = f"{m.gaze.on_screen_fraction * 100:.1f}"
+    dur = f"{m.duration_s:.1f}" if m.duration_s is not None else "—"
+    has_samples = m.n_frames > 0
+    if has_samples:
+        dom = _dominant_state(m.engagement)
+        state = f'<span class="badge badge-{dom}">{dom}</span>'
+    else:
+        state = "Unavailable"
+    foc = f"{m.engagement.focused_fraction * 100:.1f}" if has_samples else "Unavailable"
+    on_s = f"{m.gaze.on_screen_fraction * 100:.1f}" if has_samples else "Unavailable"
+    pct_unit = '<span class="unit">%</span>' if has_samples else ""
+    score = f"{m.engagement.score_summary.mean:.3f}" if has_samples else "Unavailable"
 
     return f"""
 <div class="grid-3">
@@ -159,24 +173,26 @@ def _overview_cards(m: SessionMetrics) -> str:
   </div>
   <div class="card">
     <div class="label">Dominant State</div>
-    <div class="value"><span class="badge badge-{dom}">{dom}</span></div>
+    <div class="value">{state}</div>
   </div>
   <div class="card">
     <div class="label">Focused Fraction</div>
-    <div class="value">{foc}<span class="unit">%</span></div>
+    <div class="value">{foc}{pct_unit}</div>
   </div>
   <div class="card">
     <div class="label">On-Screen Fraction</div>
-    <div class="value">{on_s}<span class="unit">%</span></div>
+    <div class="value">{on_s}{pct_unit}</div>
   </div>
   <div class="card">
     <div class="label">Mean Eng. Score</div>
-    <div class="value">{m.engagement.score_summary.mean:.3f}</div>
+    <div class="value">{score}</div>
   </div>
 </div>"""
 
 
 def _engagement_section(m: SessionMetrics) -> str:
+    if m.n_frames == 0:
+        return "<h2>Engagement Metrics</h2><p>Unavailable — no samples loaded.</p>"
     e = m.engagement
     s = e.score_summary
     rows = [
@@ -199,6 +215,8 @@ def _engagement_section(m: SessionMetrics) -> str:
 
 
 def _signal_section(m: SessionMetrics) -> str:
+    if m.n_frames == 0:
+        return "<h2>Signal Channel Summaries</h2><p>Unavailable — no samples loaded.</p>"
     g = m.gaze;  h = m.head;  b = m.blink
 
     rows = [
@@ -230,16 +248,19 @@ def _stimulus_section(m: SessionMetrics) -> str:
               "<th>During score</th><th>Score Δ</th><th>Recovery</th></tr>")
     rows = []
     for stype, st in sorted(m.stimulus_types.items()):
-        lat = f"{st.mean_latency_ms:.0f} ms" if st.mean_latency_ms else "—"
-        rec = f"{st.mean_recovery_s:.1f} s"   if st.mean_recovery_s  else "—"
+        lat = f"{st.mean_latency_ms:.0f} ms" if st.mean_latency_ms is not None else "—"
+        rec = f"{st.mean_recovery_s:.1f} s" if st.mean_recovery_s is not None else "—"
         delta_col = "#27AE60" if st.score_delta >= 0 else "#E74C3C"
-        rows.append(
-            f"<tr><td>{stype}</td><td>{st.n_trials}</td>"
-            f"<td>{st.hit_rate*100:.0f}%</td><td>{lat}</td>"
+        scores = (
             f"<td>{st.mean_baseline_score:.3f}</td>"
             f"<td>{st.mean_during_score:.3f}</td>"
             f"<td style='color:{delta_col}'>{st.score_delta:+.3f}</td>"
-            f"<td>{rec}</td></tr>"
+            f"<td>{rec}</td>"
+        ) if m.n_frames > 0 else "<td>Unavailable</td>" * 4
+        rows.append(
+            f"<tr><td>{stype}</td><td>{st.n_trials}</td>"
+            f"<td>{st.hit_rate*100:.0f}%</td><td>{lat}</td>"
+            f"{scores}</tr>"
         )
     return f"""
 <h2>Per-Stimulus Type Analysis</h2>
@@ -253,7 +274,7 @@ def _stimulus_section(m: SessionMetrics) -> str:
 </table>"""
 
 
-def _trial_table(trials: List[Dict[str, Any]]) -> str:
+def _trial_table(trials: List[Dict[str, Any]], samples_available: bool = True) -> str:
     if not trials:
         return ""
     header = ("<tr><th>#</th><th>Stimulus</th><th>Type</th>"
@@ -261,15 +282,18 @@ def _trial_table(trials: List[Dict[str, Any]]) -> str:
               "<th>Baseline</th><th>During</th><th>Recovery</th></tr>")
     rows = []
     for t in trials:
-        lat  = f"{t['reaction_latency_ms']:.0f} ms" if t.get("reaction_latency_ms") else "—"
+        lat  = f"{t['reaction_latency_ms']:.0f} ms" if t.get("reaction_latency_ms") is not None else "—"
         rtype = t.get("response_type") or "—"
-        rec   = f"{t['recovery_s']:.1f} s" if t.get("recovery_s") else "—"
+        rec   = f"{t['recovery_s']:.1f} s" if t.get("recovery_s") is not None else "—"
         hit_s = "✓" if t.get("hit") else "—"
+        scores = (
+            f"<td>{t.get('baseline_score', 0):.3f}</td>"
+            f"<td>{t.get('during_score', 0):.3f}</td><td>{rec}</td>"
+        ) if samples_available else "<td>Unavailable</td>" * 3
         rows.append(
             f"<tr><td>{t['trial_index']}</td><td>{t['stimulus_id']}</td>"
             f"<td>{t['stimulus_type']}</td><td>{lat}</td><td>{rtype}</td>"
-            f"<td>{hit_s}</td><td>{t.get('baseline_score', 0):.3f}</td>"
-            f"<td>{t.get('during_score', 0):.3f}</td><td>{rec}</td></tr>"
+            f"<td>{hit_s}</td>{scores}</tr>"
         )
     return f"""
 <h2>Trial Summaries</h2>

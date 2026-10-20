@@ -94,7 +94,18 @@ python build_dataset.py --help
 python train_behavior_model.py --help
 ```
 
-Pass a **session directory** to load both events and `samples.csv`. Passing `session_log.json` alone deliberately omits sample-based analytics. `analyze_session.py --profile path/to/user_profile.json` additionally prints an offline baseline comparison.
+Pass a **session directory** to load both events and `samples.csv`. Passing
+`session_log.json` alone deliberately omits samples. With no loaded samples,
+HTML and console reports display **Unavailable** for sample-derived measurements
+and state labels; sample charts, score comparisons, and baseline comparisons
+are omitted. Recorded events and latencies can still be shown.
+`analyze_session.py --profile path/to/user_profile.json` additionally prints an
+offline baseline comparison when samples are available.
+
+The metrics JSON retains its existing numeric schema: check `n_frames` and
+each signal summary's `n` before interpreting a value. A zero-count summary's
+numeric defaults are placeholders, not measurements. Actual zero-valued
+measurements with samples remain zero in reports.
 
 Each analysis writes to `<output-dir>/<session-id>/` and refuses an existing
 session subdirectory, including when `--no-charts` or `--no-html` is used. This

@@ -130,6 +130,8 @@ def state_distribution(
     title: str = "Engagement State Distribution",
 ) -> Optional["Figure"]:
     """Horizontal stacked bar showing session state fractions."""
+    if metrics.score_summary.n == 0:
+        return None
     labels = ["focused", "drifting", "distracted", "fatigued", "unreliable"]
     values = [
         metrics.focused_fraction,
@@ -330,9 +332,10 @@ def generate_all(log: Any, metrics: Any) -> Dict[str, Any]:
         charts["signal_channels"] = fig
 
     if metrics.stimulus_types:
-        fig = stimulus_comparison(metrics.stimulus_types)
-        if fig is not None:
-            charts["stimulus_comparison"] = fig
+        if metrics.n_frames > 0:
+            fig = stimulus_comparison(metrics.stimulus_types)
+            if fig is not None:
+                charts["stimulus_comparison"] = fig
 
         fig = reaction_latency(metrics.stimulus_types)
         if fig is not None:
