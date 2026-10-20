@@ -60,31 +60,25 @@ With N participants × M sessions each you can:
 The manifest.json is the schema contract for all of this. Future modalities
 only need to add fields to SessionEntry, not restructure the whole system.
 
-How this connects to Egra-style representation learning
----------------------------------------------------------
-Egra is the framing of this project as a research tool, not just a personal
-tracker.  Three things must be true for an Egra evaluation to be credible:
+Dataset support for future evaluation
+-------------------------------------
+The registry organises participants, sessions, and metadata for analyses that
+must be designed and evaluated separately:
 
-1. Replication across participants.  If the engagement classifier only works
-   for the person it was trained on, it has learned a personal quirk, not a
-   behavioural signal.  A multi-participant dataset lets you measure how much
-   accuracy degrades when tested on a held-out person — the hardest and most
-   informative generalisation test.
+1. Held-out participants.  Grouping by participant supports evaluating a model
+   on people whose sessions were excluded from training.  The dataset alone
+   does not establish that a model generalises to new people.
 
-2. Independent labelling.  Day 12 introduced human-survey labels.  A
-   session-level dataset makes it possible to compare: do model predictions
-   correlate with survey labels across participants, not just within one
-   session?  Cross-person agreement is the minimum credibility bar for an
-   Egra representation.
+2. Independent labels.  Session-level records can link model outputs to
+   survey labels.  Any comparison still needs a justified label definition
+   and evaluation split; agreement does not validate a cognitive measure.
 
-3. Temporal stability.  Day 13 enables longitudinal tracking: if the same
-   person's embedding cluster shifts over a week of fatigue accumulation, that
-   is a meaningful representation-level signal.  Single-session systems cannot
-   detect this at all.
+3. Temporal stability.  Sessions from different days can be compared for
+   changes in measured features.  Such changes can also reflect lighting,
+   calibration, or recording conditions, and do not by themselves show fatigue.
 
-The dataset system is therefore not infrastructure — it is what turns the
-webcam signal pipeline into a research instrument capable of making
-generalisable claims about human behaviour.
+These records support reproducible evaluation; storing them does not validate
+the pipeline's heuristic scores or establish claims about mental states.
 """
 
 from src.dataset.participant import Participant

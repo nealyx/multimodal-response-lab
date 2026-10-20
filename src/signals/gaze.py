@@ -59,15 +59,13 @@ Failure modes
     no_gaze_update() which returns the last valid analysis.
   • Missing iris landmarks (< 478 points): return None.
 
-Connection to the EGRA analyzer (Day 6+)
------------------------------------------
-  Gaze adds the third spatial channel to the signal stack:
-    Day 3: blink rate, EAR → ALERTNESS (temporal, eyes-open vs. closed)
-    Day 4: head yaw/pitch → ORIENTATION (where the head is pointing)
-    Day 5: iris ratio → GAZE (where the EYES are pointing, relative to head)
-  These three signals provide an orientation/eye-signal proxy:
-    on_screen = (head FOCUSED) AND (gaze CENTER) AND (eyes OPEN)
-  That composite will feed the EGRA engagement score in Day 6.
+Role in the signal pipeline
+---------------------------
+  Iris ratios complement the head-pose and eyelid/blink measurements.
+  The downstream scorer combines these channels into a weighted heuristic
+  score.  The gaze channel already incorporates head-pose information, so
+  these inputs are not independent evidence.  Neither the gaze estimate nor
+  the combined score is a validated measure of attention or comprehension.
 
 MediaPipe landmark index conventions used here
 ------------------------------------------------

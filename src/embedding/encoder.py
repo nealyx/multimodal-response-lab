@@ -1,24 +1,22 @@
 """Session-level and stimulus-level embedding computation.
 
-A session embedding is a single fixed-length vector that represents the
-behavioral character of an entire session.  It is computed as the mean
+A session embedding is a single fixed-length vector that summarises the
+measured features of an entire session.  It is computed as the mean
 of all per-window feature vectors — a simple but interpretable aggregation
 that preserves the feature semantics (each dimension still represents the
 same signal channel as in the per-window vectors).
 
 Per-stimulus embeddings isolate windows that overlapped with a specific
 stimulus trial.  Comparing per-stimulus embeddings across trial types or
-across sessions gives a feature-space answer to: "did this stimulus type
-produce a consistently different behavioral state?"
+across sessions describes differences in those measured features; it does
+not establish that a stimulus caused a change in a person's mental state.
 
-Connection to Egra-style representation learning
--------------------------------------------------
-An Egra-style system would learn task-specific representations from labeled
-behavioral data (e.g., "high comprehension" vs. "low comprehension" video
-segments).  The session and stimulus embeddings produced here are the
-*input* to that representation learning step — they convert variable-length
-behavioral time series into fixed vectors that a classifier, regression model,
-or contrastive learner can consume.
+Use in downstream analysis
+--------------------------
+The session and stimulus embeddings convert variable-length feature series
+into fixed vectors that a separate classifier or regression model can consume.
+This encoder computes feature means; it does not learn representations or
+validate labels such as attention, fatigue, or comprehension.
 """
 
 from __future__ import annotations
