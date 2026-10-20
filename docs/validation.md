@@ -53,8 +53,23 @@ this check.
 The badge links to [actual hosted runs](https://github.com/nealyx/multimodal-response-lab/actions/workflows/offline.yml).
 The local CI rehearsal passed **543 tests with the same four warnings**, plus the
 minimal walkthrough and explicit checks that the network/import guard rejects
-access and propagates to child Python processes. Hosted results are recorded
-below only after their jobs finish.
+access and propagates to child Python processes.
+
+The [first hosted run](https://github.com/nealyx/multimodal-response-lab/actions/runs/39440536448)
+completed successfully on 20 October 2026 at commit `bb8636e`:
+
+| Hosted job | Observed result |
+|---|---|
+| [Full suite · Ubuntu 24.04.5](https://github.com/nealyx/multimodal-response-lab/actions/runs/39440536448/job/118688876288) | 543 passed, four existing convergence warnings, zero skips |
+| [Full suite · macOS 26 arm64](https://github.com/nealyx/multimodal-response-lab/actions/runs/39440536448/job/118688877326) | 543 passed, the same four warnings, zero skips |
+| [Minimal demo · Linux](https://github.com/nealyx/multimodal-response-lab/actions/runs/39440536448/job/118688876309) | Demo, reanalysis, feature extraction, and artifact checks passed |
+| [Minimal demo · macOS](https://github.com/nealyx/multimodal-response-lab/actions/runs/39440536448/job/118688875869) | Demo, reanalysis, feature extraction, and artifact checks passed |
+
+The hosted jobs used CPython 3.12; their logs record the exact patch version,
+runner image, and resolved packages. `*-latest` runner images and dependency
+floors will move over time. These results describe the linked run, not all
+possible environments. The workflow pins checkout v7.0.1 and setup-python v7.0.0
+to their official release commit hashes.
 
 ## Reproduce
 
@@ -88,4 +103,4 @@ Do not install the test OpenCV wheel into the live GUI environment. The syntheti
 
 ## Not verified in this pass
 
-Live camera/display capture, microphone input, MediaPipe inference/model downloads, angular error, real reaction timing, Linux/Windows execution, external CI, survey administration, participant-based model evaluation, and calibrated uncertainty were not tested. The live model URL still references `latest`; exact live reproduction needs an archived model hash. No license was added or inferred.
+Live camera/display capture, microphone input, MediaPipe inference/model downloads, angular error, real reaction timing, Windows execution, survey administration, participant-based model evaluation, and calibrated uncertainty were not tested. Linux and macOS hosted checks cover only the offline paths listed above. The live model URL still references `latest`; exact live reproduction needs an archived model hash. No license was added or inferred.

@@ -14,7 +14,7 @@ The historical names `EngagementScore`, `focused`, `distracted`, and `fatigued` 
 
 ## Try it without a camera
 
-Python **3.12** is the verified local environment. Run from the repository root:
+Python **3.12** is verified locally and in the [Linux/macOS offline CI checks](docs/validation.md#continuous-checks). Run from the repository root:
 
 ```bash
 git clone https://github.com/nealyx/multimodal-response-lab.git
