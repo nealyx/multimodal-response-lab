@@ -107,6 +107,14 @@ each signal summary's `n` before interpreting a value. A zero-count summary's
 numeric defaults are placeholders, not measurements. Actual zero-valued
 measurements with samples remain zero in reports.
 
+Saved numeric measurements must be finite. CSV rows with parse errors,
+including `NaN`, infinity, or an overflowing value such as `1e400`, are skipped
+with a row-number warning; reported frame counts cover only retained rows.
+Malformed numeric strings in individual event or trial records likewise skip
+that record with a warning. Nonfinite JSON numbers anywhere in the document
+(including nested configuration), or invalid session timestamps, reject the
+session before report output is created. Source files are never rewritten.
+
 Each analysis writes to `<output-dir>/<session-id>/` and refuses an existing
 session subdirectory, including when `--no-charts` or `--no-html` is used. This
 keeps earlier charts, timelines, and reports from being mixed with a later

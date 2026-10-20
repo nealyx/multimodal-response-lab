@@ -11,6 +11,8 @@ Loading is intentionally tolerant:
   - Extra JSON keys are ignored.
   - Missing CSV columns receive safe defaults.
   - Rows with parse errors are skipped with a warning.
+  - Nonfinite numeric fields count as parse errors, never measurements.
+  - Nonfinite JSON numbers (including nested metadata) reject the JSON file.
   - Sessions with no samples (very short, user quit early) load cleanly.
 """
 
@@ -19,6 +21,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 from pathlib import Path
 from typing import List, Optional
 
@@ -56,12 +59,14 @@ def load_session_dir(session_dir: str) -> SessionLog:
 def load_session_json(json_path: str) -> SessionLog:
     """Load a SessionLog from a session_log.json file (no samples)."""
     with open(json_path, encoding="utf-8") as fh:
-        doc = json.load(fh)
+        # JSON's nonstandard NaN/Infinity constants and overflowing exponents
+        # must not enter metadata copied into exported metrics, either.
+        doc = json.load(fh, parse_float=_finite_float, parse_constant=_finite_float)
 
     session_log = SessionLog(
         session_id=      doc.get("session_id",      "unknown"),
         experiment_name= doc.get("experiment_name", "unknown"),
-        start_ts=        float(doc.get("start_ts",  0.0)),
+        start_ts=        _finite_float(doc.get("start_ts",  0.0)),
         end_ts=          _opt_float(doc.get("end_ts")),
         config=          doc.get("config", {}),
     )
@@ -94,9 +99,9 @@ def _stim_from_dict(d: dict) -> StimulusEvent:
         stimulus_id=  str(d["stimulus_id"]),
         trial_index=  int(d["trial_index"]),
         stimulus_type=str(d["stimulus_type"]),
-        onset_ts=     float(d["onset_ts"]),
+        onset_ts=     _finite_float(d["onset_ts"]),
         offset_ts=    _opt_float(d.get("offset_ts")),
-        duration_ms=  float(d["duration_ms"]),
+        duration_ms=  _finite_float(d["duration_ms"]),
         metadata=     d.get("metadata") or {},
     )
 
@@ -106,8 +111,8 @@ def _resp_from_dict(d: dict) -> ResponseEvent:
         stimulus_id=  str(d["stimulus_id"]),
         trial_index=  int(d["trial_index"]),
         response_type=str(d["response_type"]),
-        response_ts=  float(d["response_ts"]),
-        latency_ms=   float(d["latency_ms"]),
+        response_ts=  _finite_float(d["response_ts"]),
+        latency_ms=   _finite_float(d["latency_ms"]),
         hit=          bool(d.get("hit", True)),
         metadata=     d.get("metadata") or {},
     )
@@ -118,13 +123,13 @@ def _trial_from_dict(d: dict) -> TrialSummary:
         stimulus_id=         str(d["stimulus_id"]),
         trial_index=         int(d["trial_index"]),
         stimulus_type=       str(d["stimulus_type"]),
-        onset_ts=            float(d["onset_ts"]),
-        duration_ms=         float(d["duration_ms"]),
+        onset_ts=            _finite_float(d["onset_ts"]),
+        duration_ms=         _finite_float(d["duration_ms"]),
         reaction_latency_ms= _opt_float(d.get("reaction_latency_ms")),
         response_type=       d.get("response_type"),
         hit=                 bool(d.get("hit", False)),
-        baseline_score=      float(d.get("baseline_score", 0.5)),
-        during_score=        float(d.get("during_score",   0.0)),
+        baseline_score=      _finite_float(d.get("baseline_score", 0.5)),
+        during_score=        _finite_float(d.get("during_score",   0.0)),
         recovery_s=          _opt_float(d.get("recovery_s")),
     )
 
@@ -144,30 +149,40 @@ def _load_samples(csv_path: str) -> List[BehavioralSample]:
 def _sample_from_row(row: dict) -> BehavioralSample:
     return BehavioralSample(
         frame_index=        int(_get(row, "frame_index", "0")),
-        timestamp=          float(_get(row, "timestamp", "0.0")),
+        timestamp=          _finite_float(_get(row, "timestamp", "0.0")),
         active_stimulus_id= _nonempty(row.get("active_stimulus_id", "")),
         engagement_state=   _get(row, "engagement_state", "unreliable"),
-        smoothed_score=     float(_get(row, "smoothed_score", "0.5")),
-        confidence=         float(_get(row, "confidence",     "0.0")),
-        focused_fraction=   float(_get(row, "focused_fraction", "0.0")),
+        smoothed_score=     _finite_float(_get(row, "smoothed_score", "0.5")),
+        confidence=         _finite_float(_get(row, "confidence",     "0.0")),
+        focused_fraction=   _finite_float(_get(row, "focused_fraction", "0.0")),
         gaze_zone=          _get(row, "gaze_zone",  "unknown"),
         is_on_screen=       _bool(row.get("is_on_screen", "False")),
-        gaze_h=             float(_get(row, "gaze_h", "0.5")),
-        gaze_v=             float(_get(row, "gaze_v", "0.5")),
+        gaze_h=             _finite_float(_get(row, "gaze_h", "0.5")),
+        gaze_v=             _finite_float(_get(row, "gaze_v", "0.5")),
         head_zone=          _get(row, "head_zone",  "unknown"),
-        head_yaw=           float(_get(row, "head_yaw",   "0.0")),
-        head_pitch=         float(_get(row, "head_pitch", "0.0")),
+        head_yaw=           _finite_float(_get(row, "head_yaw",   "0.0")),
+        head_pitch=         _finite_float(_get(row, "head_pitch", "0.0")),
         blink_state=        _get(row, "blink_state", "unknown"),
-        mean_ear=           float(_get(row, "mean_ear",    "0.0")),
-        blink_rate=         float(_get(row, "blink_rate",  "0.0")),
+        mean_ear=           _finite_float(_get(row, "mean_ear",    "0.0")),
+        blink_rate=         _finite_float(_get(row, "blink_rate",  "0.0")),
         is_fatigued=        _bool(row.get("is_fatigued", "False")),
     )
+
+
+def _finite_float(v) -> float:
+    try:
+        value = float(v)
+    except OverflowError as exc:
+        raise ValueError("Expected a finite number within floating-point range") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"Expected a finite number, got {v!r}")
+    return value
 
 
 def _opt_float(v) -> Optional[float]:
     if v is None or v == "" or v == "None":
         return None
-    return float(v)
+    return _finite_float(v)
 
 
 def _nonempty(s: str) -> Optional[str]:
