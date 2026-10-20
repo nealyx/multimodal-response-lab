@@ -96,6 +96,12 @@ python train_behavior_model.py --help
 
 Pass a **session directory** to load both events and `samples.csv`. Passing `session_log.json` alone deliberately omits sample-based analytics. `analyze_session.py --profile path/to/user_profile.json` additionally prints an offline baseline comparison.
 
+Each analysis writes to `<output-dir>/<session-id>/` and refuses an existing
+session subdirectory, including when `--no-charts` or `--no-html` is used. This
+keeps earlier charts, timelines, and reports from being mixed with a later
+analysis. To rerun a session, choose a new root such as `--output-dir
+outputs/reanalysis-2`; other session IDs can share the same root.
+
 The supervised path defaults to labels calculated from the same signals used as features. Its metrics then describe reproduction of those rules, not independent prediction of a cognitive state. Survey labels reduce this particular circularity but remain subjective. Overlapping windows are correlated, and current random/temporal split options do not provide a participant-held-out evaluation. No real-world predictive accuracy is claimed.
 
 ## Optional live capture

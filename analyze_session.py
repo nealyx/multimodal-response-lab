@@ -188,7 +188,13 @@ def run(args: argparse.Namespace) -> None:
 
     # ── Output directory ──────────────────────────────────────────────────
     out_dir = Path(args.output_dir) / session_log.session_id
-    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        out_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        raise FileExistsError(
+            f"Report directory already exists: {out_dir}. "
+            "Choose a new --output-dir to keep each report separate."
+        ) from exc
     charts_dir = out_dir / "charts"
     charts_dir.mkdir(exist_ok=True)
 
@@ -262,7 +268,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--output-dir", default="outputs/reports",
-        help="Root directory for report output (default: outputs/reports/)",
+        help="Root directory for report output (default: outputs/reports/). "
+             "An existing session subdirectory is never overwritten.",
     )
     parser.add_argument("--no-charts", action="store_true", help="Skip chart generation")
     parser.add_argument("--no-html",   action="store_true", help="Skip HTML report")
@@ -274,7 +281,10 @@ def main() -> None:
              "against the personal baseline.",
     )
     args = parser.parse_args()
-    run(args)
+    try:
+        run(args)
+    except FileExistsError as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":
