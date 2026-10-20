@@ -1,95 +1,26 @@
-"""Composite engagement scoring: fuses blink, head pose, and gaze into one score.
+"""Weighted orientation/eye-signal proxy with smoothing and a separate quality gate.
 
-Why fuse multiple weak signals?
----------------------------------
-Each individual signal has a high false-positive rate when used alone:
+The default raw score is 0.50*gaze + 0.20*head + 0.30*eye. It is not a
+product of channels. Gaze already uses a head-pose gate and may fall back to
+head orientation, so channel independence is neither assumed nor established.
+Weights and state thresholds are engineering choices, not fitted measurements
+of cognition, emotion, attention, productivity, or health.
 
-  • Gaze alone: iris tracking degrades with glasses, bad lighting, or extreme
-    head angles.  A person staring off to one side of the screen can still be
-    genuinely engaged.
-  • Head pose alone: someone can look straight at the camera while being
-    completely mentally absent, or turn their head while still reading.
-  • Blink rate alone: low rate may mean concentration or tiredness; high rate
-    may mean eye irritation or active engagement.
+An EMA (default alpha=0.10) smooths the score; five consecutive candidate
+states are required before the displayed state changes. Both delays depend on
+the processed frame rate. Even UNRELIABLE is debounced, so callers should use
+current confidence/face availability when deciding whether to use a frame.
 
-Combining three orthogonal channels — WHERE the eyes are pointing (gaze),
-WHERE the head is pointing (head pose), and WHETHER the eyes are behaviorally
-healthy (blink/EAR) — makes the composite far more robust than any single
-channel.  Individual channel noise is largely uncorrelated, so their product
-correctly pushes toward zero only when all three agree that attention is absent.
+Confidence is a distinct heuristic: history_warmup * gaze_quality * pose_quality,
+with zero confidence when face_detected=False. It is not a calibrated probability.
+A low proxy score with high confidence is still not proof of distraction.
+Missing head and blink inputs use neutral component values; missing iris uses a
+head fallback where available. Confidence does not cover every missing-channel
+combination, and the caller must report face availability correctly.
 
-Why temporal smoothing is necessary
---------------------------------------
-Frame-to-frame scores jump significantly due to:
-  • A single blink (EAR drops briefly, pulling eye_score to near zero)
-  • MediaPipe jitter at the start of a detection
-  • Transient head movement (adjusting posture)
-  • Occasional iris landmark instability
-
-An Exponential Moving Average (EMA) with a short half-life (~0.4 s at 25 FPS)
-absorbs these transients without creating noticeable lag for genuine attention
-changes (which take seconds to develop).
-
-State debouncing adds a second layer: the new state must persist for N
-consecutive frames before the label changes, preventing single-frame flips in
-the displayed state badge.
-
-Reliability vs. attention
----------------------------
-These are independent dimensions:
-
-  confidence  — how much we trust the measurement.  Low if:
-                  • face absent (0.0)
-                  • no iris landmarks (gaze_weight penalty)
-                  • head pose reprojection error is high
-                  • history too short to be statistically meaningful
-
-  smoothed_score — the signal value (what we measured, given confidence > 0).
-
-A high-confidence LOW score → person is distracted.
-A low-confidence score    → we cannot tell.
-
-The engagement state maps onto this 2-D space:
-  FOCUSED     : high score, high confidence
-  DRIFTING    : moderate score, any confidence
-  DISTRACTED  : low score, adequate confidence
-  FATIGUED    : fatigue flags active, regardless of score
-  UNRELIABLE  : face absent or confidence < min_confidence
-
-Failure modes that remain
----------------------------
-  • Motivated deception: looking at camera while mentally absent — we do not
-    read cognitive engagement, only behavioural orientation.
-  • Screen off-center: someone with two monitors may look legitimately at a
-    second monitor and be classified as DISTRACTED.
-  • Calibration: all thresholds are population averages; per-user adaptation
-    would reduce false alarms significantly.
-  • Short sessions: confidence builds slowly; the first 10–15 s of a session
-    should be treated as warm-up.
-
-This is approximate behavioural inference, NOT a medical or cognitive
-diagnostic tool.  Results should not be used to make individual assessments.
-
-How this completes the human-response analyzer
-------------------------------------------------
-The pipeline is now:
-
-  Raw pixels → face landmarks (Day 2)
-           → EAR / blink FSM (Day 3)
-           → head pose / attention zone (Day 4)
-           → iris position / gaze zone (Day 5)
-           → composite engagement score (Day 6)
-
-Day 6 adds the synthesis layer.  The output is:
-  EngagementScore.state          — categorical (FOCUSED/DRIFTING/DISTRACTED/…)
-  EngagementScore.smoothed_score — continuous [0, 1] for time-series logging
-  EngagementScore.focused_fraction  — rolling percentage (the EGRA headline metric)
-  EngagementScore.confidence     — data-quality gate for downstream decisions
-
-A system reading these fields can trigger adaptive responses:
-  score < 0.4 for > 30 s → prompt the user
-  state == FATIGUED        → suggest a break
-  focused_fraction > 0.8  → log as high-engagement session
+Calibration profiles and offline baseline comparisons exist in src.calibration.
+This scorer does not automatically load them or personalize its thresholds.
+Enum names are retained for API compatibility and describe heuristic states.
 """
 
 from __future__ import annotations

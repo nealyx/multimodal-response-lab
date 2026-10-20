@@ -1,339 +1,111 @@
-# Architecture
+# Architecture and interpretation
 
-This document describes the full design of multimodal-response-lab: data flow, module responsibilities, temporal synchronization model, and the key engineering decisions made at each layer.
+This is a local signal-processing and experiment-tooling prototype. Its labels describe configured heuristics. The code does not establish cognition, emotion, attention, health, or real-world predictive accuracy.
 
----
+## Data flow
 
-## System overview
-
-The system is a **layered signal pipeline**. Each layer takes the raw output of the layer below, applies one behavioral inference step, and emits a typed data object that the next layer can consume. No layer reaches up or sideways — each module depends only on its own configuration and the typed input it receives.
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        Input: Webcam @ 30 FPS                           │
-└───────────────────────────────────┬─────────────────────────────────────┘
-                                    │ raw BGR frames
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Layer 0 — FacePipeline  (src/pipelines/face_pipeline.py)               │
-│                                                                         │
-│  MediaPipe FaceLandmarker 0.10+ (Task API, float16, ~3 MB)              │
-│  Output: 478 normalized (x, y, z) landmarks per face                   │
-│  Threading: capture thread queues frames; caller calls process_latest() │
-└──────────┬──────────────────────┬──────────────────────────────────────┘
-           │                      │                      │
-           ▼                      ▼                      ▼
-┌────────────────┐  ┌─────────────────────────┐  ┌────────────────────────┐
-│ Layer 1a       │  │ Layer 1b                 │  │ Layer 1c               │
-│ Eye metrics    │  │ Head pose                │  │ Iris position          │
-│ (eye_metrics)  │  │ (head_pose)              │  │ (gaze, extract_*)      │
-│                │  │                          │  │                        │
-│ EAR (left,     │  │ 6-point solvePnP model   │  │ H/V ratios per eye     │
-│ right, mean)   │  │ → rvec, tvec             │  │ from indices 468/473   │
-│ openness [0,1] │  │ → RQDecomp3x3 Euler      │  │ is_reliable (EAR gate) │
-│                │  │ → PoseMeasurement        │  │ → GazeMeasurement      │
-└───────┬────────┘  └───────────┬─────────────┘  └──────────┬─────────────┘
-        │                       │                            │
-        ▼                       ▼                            ▼
-┌────────────────┐  ┌─────────────────────────┐  ┌────────────────────────┐
-│ Layer 2a       │  │ Layer 2b                 │  │ Layer 2c               │
-│ Blink Detector │  │ Attention Detector       │  │ Gaze Detector          │
-│ (blink_detector│  │ (attention)              │  │ (gaze)                 │
-│                │  │                          │  │                        │
-│ 4-state FSM    │  │ Zone classification      │  │ 9-zone classification  │
-│ rolling rate   │  │ rolling yaw/pitch std    │  │ on-screen heuristic    │
-│ fatigue flags  │  │ attention_fraction       │  │ rolling H/V stability  │
-│ → BlinkAnalysis│  │ → AttentionAnalysis      │  │ → GazeAnalysis         │
-└───────┬────────┘  └───────────┬─────────────┘  └──────────┬─────────────┘
-        │                       │                            │
-        └───────────────────────┼────────────────────────────┘
-                                │ 3 orthogonal behavioral channels
-                                ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Layer 3 — AttentionScorer  (src/signals/engagement.py)                  │
-│                                                                         │
-│  Weighted sum:  score = 0.50·gaze + 0.20·head + 0.30·eye               │
-│  EMA:           smoothed = α·raw + (1−α)·prev  (α=0.10, ~0.4s τ)       │
-│  Debounce:      new state confirmed after 5 consecutive matching frames  │
-│  Confidence:    penalised for missing iris, high reproj error, short Δt │
-│                                                                         │
-│  Output: EngagementScore (state, smoothed_score, confidence,            │
-│          focused_fraction, component scores, flags)                     │
-└────────────────────────┬────────────────────────────────────────────────┘
-                         │
-          ┌──────────────┼──────────────────────┐
-          ▼              ▼                       ▼
-┌──────────────┐  ┌─────────────────┐  ┌────────────────────────────────┐
-│ Live overlay │  │ Stimulus layer  │  │ Reporting layer                │
-│ (overlay.py) │  │ (src/stimulus/) │  │ (src/reporting/)               │
-│              │  │                 │  │                                │
-│ HUD panels   │  │ StimulusPresent-│  │ SessionReporter:               │
-│ drawn on     │  │ er + EventReco- │  │ SessionLog → SessionMetrics    │
-│ each frame   │  │ rder + exporter │  │                                │
-│              │  │                 │  │ charts.py → PNG figures         │
-│              │  │ JSON/CSV output │  │ html_report.py → HTML          │
-└──────────────┘  └─────────────────┘  └────────────────────────────────┘
+```mermaid
+flowchart TD
+    Camera[Optional webcam] --> Capture[Capture thread: latest-frame buffer]
+    Capture --> Face[Caller thread: MediaPipe VIDEO inference]
+    Face --> Eyes[EAR and blink state machine]
+    Face --> Head[solvePnP head pose and rolling zones]
+    Face --> Gaze[Iris ratios and head-pose gate]
+    Eyes --> Score[Weighted proxy, EMA, confidence, debounce]
+    Head --> Gaze
+    Head --> Score
+    Gaze --> Score
+    Synthetic[Scripted signal analyses: offline demo] --> Score
+    Score --> Sample[BehavioralSample]
+    Stimulus[Optional visual trials and response events] --> Session[SessionLog]
+    Sample --> Session
+    Session --> Files[JSON metadata and events + per-frame CSV]
+    Files --> Reports[Metrics, charts, self-contained HTML]
+    Files --> Features[18-dimensional window features]
+    Features --> Exploration[PCA, K-Means, anomaly flags]
+    Features --> Models[Supervised baseline classifiers]
+    Survey[Retrospective survey labels] --> Models
+    Profile[Personal baseline profile] --> Comparison[Offline baseline comparison]
+    Reports --> Comparison
+    Files --> Catalog[Participant/session catalog and checks]
 ```
 
----
+`demo_offline.py` enters at scripted signal analyses. It exercises the actual `AttentionScorer`, session exporter, loader, analytics, and report renderer. It does **not** test camera capture, face detection, geometric estimation, the blink detector's extraction accuracy, or observed reaction times. All generated artifacts retain synthetic provenance.
 
-## Temporal synchronization model
+## Scoring and confidence are different
 
-**All timestamps in the system are `time.monotonic()`.**
+[`AttentionScorer`](../src/signals/engagement.py) receives typed `BlinkAnalysis`, `AttentionAnalysis`, and `GazeAnalysis` objects. With the checked-in defaults:
 
-Monotonic time is immune to NTP corrections and daylight-saving adjustments. This matters because reaction latency is computed as `response_ts − onset_ts` — if either used wall-clock time and a time correction happened mid-session, latencies would be corrupted.
+| Component | Calculation |
+|---|---|
+| Gaze | `on_screen_fraction` when reliable; otherwise `0.65 × head.attention_fraction` if head data exists, else zero |
+| Head | `attention_fraction × (1 − min(0.5, (yaw_std + pitch_std)/30))`; missing input uses 0.5 |
+| Eye | Mean openness, multiplied by 0.15 for prolonged closure **or** 0.35 for drowsiness; additional 0.80/0.85 low/high-rate factors; clamped to [0,1]; missing input uses 0.5 |
+| Raw proxy | `0.50 × gaze + 0.20 × head + 0.30 × eye` |
+| Smoothed proxy | `alpha × raw + (1 − alpha) × previous`, initially 0.5; default `alpha=0.10` |
 
-### The timing chain
+The default weights sum to one. The implementation does not automatically normalize arbitrary custom weights. Gaze and head share information, so their noise is not established to be independent.
 
-```
-time.monotonic()
-    │
-    ├── frame.timestamp_process  ← set by FacePipeline when frame is dequeued
-    │                              (not when the sensor captured it — ~30–100 ms earlier)
-    │
-    ├── StimulusEvent.onset_ts  ← set when StimulusPresenter first renders the stimulus
-    │                              (before cv2.imshow — ~8–32 ms before display)
-    │
-    ├── ResponseEvent.response_ts  ← set at key press detection in main loop
-    │
-    └── BehavioralSample.timestamp  ← same as frame.timestamp_process
-```
+Confidence is a separate heuristic:
 
-**Reaction latency** = `response_ts − onset_ts`  
-This is stimulus-to-key, not stimulus-on-screen-to-key. Display latency (~8–32 ms typical LCD) is a known systematic offset, documented but not corrected.
-
-**Why not use wall-clock time?**  
-`time.time()` can jump backward or skip during NTP corrections. A 20 ms NTP adjustment in a 300 ms reaction time window produces a −6.7% to +6.7% latency error. Monotonic clocks never jump.
-
----
-
-## Module responsibilities
-
-### `src/pipelines/face_pipeline.py` — FacePipeline
-
-- Manages the capture thread and the MediaPipe inference thread independently
-- Exposes a single `process_latest(timeout)` call to the main loop
-- Handles camera warm-up (blank-frame rejection), backend selection, and device index
-- Detects Continuity Camera (iPhone webcam via macOS) using `system_profiler` and warns
-
-### `src/signals/eye_metrics.py` — EAR extraction
-
-- Computes Eye Aspect Ratio (EAR) from 6 landmark indices per eye
-- Normalises to `mean_openness ∈ [0, 1]` using configurable `ear_closed_ref` and `ear_open_ref`
-- Returns `Optional[EyeMeasurement]` — None when fewer than 468 landmarks are present
-
-### `src/signals/blink_detector.py` — BlinkDetector (4-state FSM)
-
-States: `OPEN → CLOSING → CLOSED → OPENING → OPEN`
-
-- **Hysteresis:** separate close threshold (0.20) and open threshold (0.25) prevent boundary bouncing
-- **Debounce:** 2+ consecutive frames required to confirm state transitions
-- **Duration gate:** only counts as a blink if the closed interval is 60–500 ms
-- **Rolling rate:** blinks/minute over a 60 s window with a 15 s warm-up guard
-- **Fatigue flags:** `is_prolonged_closure` (>500 ms), `is_low_blink_rate` (<8/min), `is_drowsy` (compound)
-
-Why an FSM over a simple threshold: a threshold can't distinguish a 50 ms landmark jitter from a 200 ms real blink. The FSM adds duration, debounce, and hysteresis at minimal computational cost.
-
-### `src/signals/head_pose.py` — solvePnP pose estimation
-
-6-point 3D canonical face model in **Y-down convention** (critical: OpenCV camera coordinates use Y-down):
-
-```
-Point     3D (mm)               Landmark index
-─────────────────────────────────────────────
-Nose tip  [ 0.0,   0.0,   0.0]  1
-Chin      [ 0.0,  63.6, -12.5]  152
-L eye     [-43.3,-32.7, -26.0]  33
-R eye     [ 43.3,-32.7, -26.0]  263
-L mouth   [-28.9,  28.9,-24.1]  61
-R mouth   [ 28.9,  28.9,-24.1]  291
+```text
+if face_detected is false: confidence = 0
+otherwise:
+  history = min(1, elapsed_since_first_update / min_history_s)
+  gaze_quality = 1 when iris is reliable, otherwise 0.75
+  pose_quality = 1 − min(0.3, max(0, reprojection_error − 0.5*error_max)/error_max)
+  confidence = history × gaze_quality × pose_quality
 ```
 
-`RQDecomp3x3` extracts Euler angles (pitch, yaw, roll) in degrees from the rotation matrix.
-Reprojection error is logged; >10 px indicates poor landmark quality and penalises the confidence score.
+A nonpositive `min_history_s` disables warmup. When head data is absent, pose quality defaults to one; confidence also does not separately penalize a missing blink channel. This is a quality indicator with known gaps, **not calibrated uncertainty**. Elapsed warmup time is not a count of continuously valid frames.
 
-Why not use the landmark-provided face geometry directly: solvePnP gives an explicit 6-DOF pose in a metric space (millimetres), which makes the angle thresholds in `attention.py` geometrically meaningful. Direct 2D landmark positions are projective and frame-size-dependent.
+Classification considers face availability and minimum confidence first, then closure/drowsiness flags, then score thresholds. Every new state—including `unreliable`—must persist for the configured number of frames (default five). Current confidence may be zero while the displayed badge still contains the previous state. Consumers should inspect both.
 
-### `src/signals/gaze.py` — GazeDetector
+At `alpha=0.10`, the EMA half-life is `log(0.5)/log(0.9) ≈ 6.58 processed frames`, or about 0.263 s at 25 FPS. It is not a fixed wall-clock filter. Five-frame debounce and irregular frame arrival add further delay. Rolling fractions count stored frames within a time window rather than integrating elapsed time.
 
-Iris indices: `473` (subject's left iris centre), `468` (subject's right iris centre).
-With `flip_horizontal=True` (default), both irises move in the same image-pixel direction.
+## Capture and timing
 
-H-ratio: `(iris_x − inner_corner_x) / (outer_corner_x − inner_corner_x)` ∈ [0, 1]  
-→ 0.5 = centered, <0.5 = looking toward image-left, >0.5 = toward image-right
+[`FacePipeline`](../src/pipelines/face_pipeline.py) has a background **capture** thread and a latest-frame buffer. `process_latest()` performs synchronous MediaPipe VIDEO inference on its calling thread; there is no independent background inference worker. The default model is downloaded only if absent.
 
-V-ratio: `(iris_y − lid_top_y) / (lid_bottom_y − lid_top_y)` ∈ [0, 1]  
-→ 0.25–0.70 = normal range; <0.25 = looking up; >0.70 = looking down
+The live pipeline stamps buffer writes and processing completion with `time.perf_counter()`. The experiment establishes start/end values with `time.monotonic()` and supplies processed-frame timestamps to its presenter and recorder. These are application-clock timestamps; an assumption that the clock origins are compatible must be checked on a target runtime. They do not independently measure exposure time or display-photon onset. Synthetic sessions use explicitly labeled relative seconds instead.
 
-**on-screen heuristic:** iris in CENTER zone AND `|yaw| ≤ 25°` AND `|pitch| ≤ 20°`  
-Head pose gates the iris reading because large head rotations distort the apparent iris position in the image plane even when the eyes are looking forward.
+Visual onset is recorded when the presenter activates/renders an event. Key handling and behavioral changes are polled by the main loop. `response_ts − onset_ts` therefore includes software and device timing effects. EMA/debounce affect signal-state response events differently from key events. No live timing benchmark or fixed ±33 ms precision is established here.
 
-### `src/signals/engagement.py` — AttentionScorer
+## Session files and reports
 
-Three component scores → weighted sum → EMA → debounced state:
+[`src/stimulus/events.py`](../src/stimulus/events.py) defines the shared dataclasses. [`SessionExporter`](../src/stimulus/exporter.py) writes:
 
-```
-gaze_score  = gaze.on_screen_fraction   (if reliable)
-              OR head.attention_fraction × 0.65  (head-only fallback)
+- `session_log.json`: configuration, session metadata, stimulus/response events, optional trial summaries.
+- `samples.csv`: one row per processed frame, including score, confidence, gaze ratios, head angles, blink metrics, and state.
+- `events.csv`: merged stimulus/response events.
 
-head_score  = head.attention_fraction × (1 − stability_penalty)
-              stability_penalty = min(0.5, (yaw_std + pitch_std) / 30°)
+`load_session_dir()` reads JSON plus samples. `load_session_json()` reads only JSON and therefore has no per-frame samples. The loader is tolerant of extra fields and skips malformed records with warnings; it is not a strict provenance validator.
 
-eye_score   = blink.mean_openness
-              × 0.15 if prolonged_closure
-              × 0.35 if drowsy
-              × 0.80 if low_blink_rate
-              × 0.85 if high_blink_rate
+`SessionReporter` computes aggregate signal summaries, heuristic state fractions, key-response latencies, and event-relative baseline/during/recovery comparisons. A lower during-event score is a descriptive association, not proof that the event disrupted attention. Some statistics include unreliable frames and placeholder signal values; inspect confidence and the exported timeline before drawing conclusions.
 
-raw = 0.50 × gaze_score + 0.20 × head_score + 0.30 × eye_score
-smoothed = 0.10 × raw + 0.90 × prev_smoothed
+HTML embeds charts as PNG data URLs and makes no CDN/font requests. Synthetic provenance in `config.provenance.synthetic` adds a conspicuous notice. `generated_at` uses UTC wall time only for report metadata, not event latency.
 
-candidate_state = classify(smoothed, is_fatigued, confidence)
-if candidate == prev_candidate: candidate_frames += 1
-if candidate_frames >= 5: current_state = candidate  ← debounce
-```
+The reporting/event path does not require OpenCV or MediaPipe. Package-level rendering exports are imported lazily, and a pose type annotation does not pull the native vision stack into the pure scorer. Rendering and geometric-estimation tests still use OpenCV on synthetic arrays.
 
-**Why three channels with these weights:**  
-Gaze is the primary signal because it directly measures where attention is directed. Eye alertness (EAR/blink) captures fatigue independently of orientation. Head pose is a lower-weight supplement — it becomes important when iris data is unreliable (glasses, poor lighting), but adds little when gaze is reliable because the gaze component already incorporates a head-pose gate.
+## Calibration and learning
 
----
+[`run_calibration.py`](../run_calibration.py) supports two distinct workflows:
 
-## Stimulus layer (Day 7)
+- **Baseline recording:** collect raw values and save a `UserProfile` with EAR, blink-rate, orientation, gaze, and proxy-score summaries. Profile convenience properties expose candidate personalized thresholds.
+- **Survey:** collect retrospective session ratings and save survey/label files without opening a camera.
 
-### Scheduling model
+`analyze_session.py --profile ...` prints comparisons against that profile. The live dashboard and scorer do not automatically load a profile or modify their thresholds. Baseline recording is also not calibrated mapping from gaze ratios to screen coordinates.
 
-The `build_schedule(cfg, t0)` function converts the YAML stimulus list into a flat chronological list of `ScheduledTrial` objects with absolute monotonic onset times:
+[`src/embedding/`](../src/embedding/) computes 18 hand-engineered features from overlapping windows. PCA plots, clusters, and anomaly flags describe those features; they do not discover or validate mental-state categories.
 
-```
-t_trial_k = t0 + baseline_s + Σ_{i=0}^{k-1} (duration_i/1000 + max(0.5, isi + jitter_i))
-```
+[`src/supervised/`](../src/supervised/) trains baseline classifiers with heuristic labels or survey labels. Heuristic labels are circular when derived from their own predictor features. Surveys provide a different source but may assign a single subjective rating to every window in a session. Current splitting offers random or ordered temporal splits, without a participant-held-out split or a purge gap for overlapping windows. Reported classifier scores must remain scoped to that evaluation.
 
-`StimulusPresenter.update(frame, ts)` checks whether `ts ≥ trial.start_ts` on every frame. This means timing is **pull-based** — no background threads, no timers. A dropped frame simply delays the next check by one frame period (~33 ms), which is within the frame-rate granularity of the system anyway.
+[`src/dataset/`](../src/dataset/) catalogs participants, sessions, optional profiles, labels, and embeddings. It is local file management, not a claim of a published participant dataset.
 
-### Response detection
+## Reproducibility boundary
 
-`EventRecorder.record_sample(sample, active_event)` detects two implicit response types:
-- `gaze_shift`: `is_on_screen` transitions from `True → False` while a stimulus is active
-- `attention_change`: `engagement_state` value changes while a stimulus is active
-
-Key-press responses (`key_press`) are detected explicitly in the main loop via `presenter.notify_key(key, ts)`.
-
-All response events carry `latency_ms = (response_ts − onset_ts) × 1000`.
-
----
-
-## Reporting layer (Day 8)
-
-The reporting layer has **zero runtime dependency on OpenCV or MediaPipe**. It reads session files (JSON + CSV) and produces derived artifacts.
-
-### SessionMetrics schema (abbreviated)
-
-```python
-SessionMetrics
-├── session_id, experiment_name, generated_at
-├── duration_s, n_frames, n_trials, n_responses
-│
-├── EngagementMetrics
-│   ├── score_summary: SignalSummary  (mean, std, min, max, p25, p75, n)
-│   └── *_fraction: float  (focused, drifting, distracted, fatigued, unreliable)
-│
-├── GazeMetrics
-│   ├── on_screen_fraction
-│   └── gaze_h_summary, gaze_v_summary: SignalSummary
-│
-├── HeadMetrics
-│   ├── head_focused_fraction
-│   └── yaw_summary, pitch_summary: SignalSummary
-│
-├── BlinkMetrics
-│   ├── blink_rate_summary: SignalSummary
-│   ├── fatigue_fraction
-│   └── ear_summary: SignalSummary
-│
-└── stimulus_types: Dict[str, StimulusTypeMetrics]
-    └── StimulusTypeMetrics
-        ├── n_trials, hit_rate
-        ├── mean/median/std latency_ms
-        ├── mean_baseline_score, mean_during_score, score_delta
-        └── mean_recovery_s
-```
-
-### Per-trial analysis
-
-For each stimulus trial, `SessionAnalytics` computes:
-- `baseline_score`: mean engagement in the 5 s window before onset
-- `during_score`: mean engagement during the stimulus
-- `score_delta`: `during − baseline` (negative = stimulus was disruptive)
-- `recovery_s`: seconds after stimulus offset for score to return to ≥90% of baseline
-
-This structure parallels event-related analysis in EEG/fMRI research — measuring signals relative to event epochs rather than as raw time series.
-
----
-
-## Key design decisions
-
-### 1. All timestamps are monotonic
-
-`time.monotonic()` everywhere. No `datetime.now()`, no `time.time()`. Reaction latency is simply `response_ts − onset_ts`.
-
-### 2. Raw measurements are strictly separated from inferred states
-
-`GazeMeasurement` (iris ratios, pixel coordinates) is separate from `GazeAnalysis` (zone classification, on-screen heuristic). `EyeMeasurement` (EAR values) is separate from `BlinkAnalysis` (FSM state, fatigue flags). This separation makes each layer independently testable.
-
-### 3. Every module accepts `None` inputs gracefully
-
-If iris landmarks are absent, `GazeDetector.no_gaze_update()` returns the last valid analysis. If head pose fails, `AttentionDetector.no_pose_update()` returns the last valid result. `AttentionScorer.update()` can be called with all signals as `None` and will return a valid `EngagementScore` (with `confidence=0.0`). This prevents a single bad frame from crashing the pipeline.
-
-### 4. Configuration is always a dict, never a file path
-
-Modules receive `cfg: dict` at construction and never import YAML or JSON files directly. This makes unit testing trivial — pass `{"engagement": {"smoothing": {"alpha": 1.0}}}` and the module immediately reflects it, no file I/O.
-
-### 5. Tests inject typed mock objects, not raw landmarks
-
-Tests build `BlinkAnalysis`, `GazeAnalysis`, and `AttentionAnalysis` objects directly from Python constructors. No webcam, no MediaPipe model, no OpenCV display. The full suite runs in ~1 second.
-
-### 6. The reporting layer is dependency-isolated
-
-`src/reporting/` imports only `src/stimulus/events.py` (pure dataclasses) and `src/stimulus/analytics.py` (pure computation). It never imports OpenCV, MediaPipe, or any live-pipeline module. This means reports can be generated on any machine with `numpy` and `matplotlib` — no webcam stack required.
-
----
-
-## Signal interaction and failure modes
-
-```
-Signal interaction matrix:
-
-              Gaze score  Head score  Eye score
-              ──────────  ──────────  ─────────
-Iris absent      ↓ (head    —           —
-                 fallback)
-Head absent      ↓ (no      ↓ (neutral  —
-                 gate)      0.5)
-Blink occludes   ↓ (iris    —           ↓↓↓
-                 unreliable)             (×0.15)
-High reproj err  ↓ (gaze    ↓ (penalty  —
-(confidence)     penalty)   in conf.)
-No face          0.0        0.5         0.5
-                 (gaze=0    (neutral)   (neutral)
-                 fallback)
-
-Note: head=0.5 and eye=0.5 when absent because "no evidence of
-distraction" ≠ "evidence of distraction". Only gaze defaults to
-0.0 when absent because a missing face is more likely off-screen
-than unknown.
-```
-
----
-
-## File naming conventions
-
-| Pattern | Meaning |
-|---------|---------|
-| `run_*.py` | Live script — requires webcam, enters main loop, calls cv2.imshow |
-| `src/signals/*.py` | Signal processing module — pure Python, no I/O, testable offline |
-| `src/stimulus/*.py` | Experiment infrastructure — timestamps, events, schedule |
-| `src/reporting/*.py` | Offline analytics — no OpenCV/MediaPipe dependency |
-| `tests/test_*.py` | Unit tests — no webcam, no display, no file I/O (except loader tests) |
-| `configs/*.yaml` | Configuration — all runtime parameters |
-| `outputs/sessions/` | Session data written by live experiment scripts |
-| `outputs/reports/` | Analytics output written by analyze_session.py |
+- Use the synthetic fixture to check software behavior without collecting anyone's data.
+- Record source revision, Python/dependency versions, config, model hash, hardware, and sampling conditions for live experiments. The model download URL currently uses `latest`.
+- Default session export excludes raw video/images, but debug utilities can write frame images. Per-frame exports and surveys remain potentially sensitive.
+- The legacy `requirements.txt` includes broader experimental dependencies; the smaller offline, test, and live requirement files describe the implemented paths used here.
+- See [validation.md](validation.md) for actual checks. Neither passing tests nor personal calibration establishes accuracy, causality, or a medical measurement.

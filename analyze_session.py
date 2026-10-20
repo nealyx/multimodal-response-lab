@@ -1,68 +1,15 @@
 #!/usr/bin/env python3
-"""Offline session analytics and report generation — Day 8.
+"""Analyze saved session files without camera or model dependencies.
 
-Loads a session produced by run_stimulus_experiment.py and computes
-session-level behavioral metrics, generates charts, and writes an
-HTML report.
+Usage: python analyze_session.py <session-directory> [--profile <profile.json>]
+Use --help for chart, HTML, output-directory, and browser options.
 
-Usage
------
-    # Analyze a session directory (contains session_log.json + samples.csv)
-    python analyze_session.py outputs/sessions/20241201_120000/
-
-    # Analyze just the JSON (no sample-based metrics)
-    python analyze_session.py outputs/sessions/20241201_120000/session_log.json
-
-    # Specify output directory
-    python analyze_session.py <session> --output-dir outputs/reports/
-
-    # Skip charts or HTML
-    python analyze_session.py <session> --no-charts
-    python analyze_session.py <session> --no-html
-
-    # Open the HTML report in the default browser
-    python analyze_session.py <session> --open
-
-Output layout
--------------
-    <output_dir>/<session_id>/
-        session_metrics.json   — SessionMetrics as JSON
-        timeline.csv           — sample-by-sample time series with relative timestamp
-        charts/
-            engagement_timeline.png
-            state_distribution.png
-            signal_channels.png
-            stimulus_comparison.png   (only if stimuli were presented)
-            reaction_latency.png      (only if key-press responses recorded)
-        report.html            — self-contained HTML with embedded charts
-
-Why keep analytics separate from live inference
------------------------------------------------
-The live pipeline (run_stimulus_experiment.py) must maintain <33 ms frame
-processing to avoid dropped frames.  Generating matplotlib figures, writing
-multi-MB HTML files, and computing distribution statistics would all disrupt
-timing.  Separating them means:
-  - The live script is simple: record and persist.
-  - Reanalysis with different parameters is cheap: just re-run this script.
-  - The reporting layer has no dependency on OpenCV or MediaPipe.
-
-Per-stimulus analysis makes the system more research-like
----------------------------------------------------------
-Aggregate session metrics (mean score, focused %) are useful for dashboards.
-Per-stimulus analysis — comparing engagement score during a ColorFlash vs. a
-ReactionPrompt, measuring how quickly the score recovers after each trial —
-is what makes the system comparable to research paradigms like ERP studies or
-event-related fMRI.  It allows causal questions: "did this specific stimulus
-disrupt attention?" rather than "was this person generally engaged?"
-
-Limitations
------------
-  - Display latency (~8–32 ms) is NOT corrected in reaction times.
-  - Frame-rate granularity limits temporal precision to ~33 ms.
-  - EMA smoothing in the engagement scorer adds 200–400 ms lag to state-change
-    responses, so 'attention_change' latencies are systematically longer than
-    'key_press' latencies.
-  - Population-average thresholds: per-user calibration would improve accuracy.
+Reports summarize recorded proxies and event-relative changes. Those changes
+do not by themselves establish stimulus causation, cognition, or attention.
+Latency is an application-clock interval, including recording/rendering/polling
+and smoothing effects; no camera/display latency correction has been validated.
+Calibration profiles support optional offline baseline comparisons, not an
+automatic change to live scoring thresholds.
 """
 
 from __future__ import annotations
@@ -259,6 +206,11 @@ def run(args: argparse.Namespace) -> None:
         log.info("Generating charts …")
         figs = generate_all(session_log, metrics)
         for name, fig in figs.items():
+            if session_log.config.get("provenance", {}).get("synthetic") is True:
+                fig.suptitle(
+                    "SYNTHETIC DEMONSTRATION — no participant recording",
+                    color="#E67E22", fontsize=10, y=1.02,
+                )
             png  = figure_to_png_bytes(fig)
             path = charts_dir / f"{name}.png"
             path.write_bytes(png)
@@ -296,7 +248,7 @@ def run(args: argparse.Namespace) -> None:
     if html_path:
         print(f"  HTML report:      {html_path}")
     if args.open and html_path and html_path.exists():
-        webbrowser.open(html_path.as_uri())
+        webbrowser.open(html_path.resolve().as_uri())
 
 
 def main() -> None:

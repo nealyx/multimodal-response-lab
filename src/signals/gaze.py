@@ -15,11 +15,9 @@ the iris within the eye region, which is affected by:
   • Individual anatomy (deep-set eyes, epicanthic folds, etc.)
   • Glasses and contact lenses
 
-Expected accuracy: 4–10° in isolation, improving to 2–5° once head pose is
-used to compensate for the largest error source.  This is sufficient to
-distinguish ON_SCREEN from clearly OFF_SCREEN, and CENTER from LEFT/RIGHT at
-the 20–25° level.  It cannot resolve fine within-screen gaze (e.g. which
-paragraph the person is reading).
+No angular-accuracy benchmark is included for this implementation. Iris ratios
+and head-pose gates provide coarse orientation proxies, not calibrated screen
+coordinates. They cannot establish which paragraph a person is reading.
 
 How iris position approximates gaze direction
 ----------------------------------------------
@@ -67,7 +65,7 @@ Connection to the EGRA analyzer (Day 6+)
     Day 3: blink rate, EAR → ALERTNESS (temporal, eyes-open vs. closed)
     Day 4: head yaw/pitch → ORIENTATION (where the head is pointing)
     Day 5: iris ratio → GAZE (where the EYES are pointing, relative to head)
-  Combined, these three signals approximate *actual visual attention*:
+  These three signals provide an orientation/eye-signal proxy:
     on_screen = (head FOCUSED) AND (gaze CENTER) AND (eyes OPEN)
   That composite will feed the EGRA engagement score in Day 6.
 

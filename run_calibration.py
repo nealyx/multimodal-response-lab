@@ -382,8 +382,8 @@ def main() -> None:
         help=f"Path to save user_profile.json (default: {_DEFAULT_OUTPUT})",
     )
     parser.add_argument(
-        "--config", default="config/default.yaml",
-        help="Signal config file (default: config/default.yaml)",
+        "--config", default="configs/default.yaml",
+        help="Signal config file (default: configs/default.yaml)",
     )
     args = parser.parse_args()
 

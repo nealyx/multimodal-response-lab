@@ -1,0 +1,5 @@
+-r requirements-offline.txt
+# The complete suite tests solvePnP and rendering on synthetic arrays, without a GUI.
+# Use a separate environment from the live GUI install: do not mix OpenCV wheels.
+opencv-python-headless>=4.8.0
+pytest>=7.4.0

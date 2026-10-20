@@ -15,7 +15,9 @@ reliable.  To get trustworthy metrics you need either:
   - Sessions from multiple people (between-person CV)
   - A temporal hold-out (train on first 80% of session, test on last 20%)
 
-The pipeline supports all three via the split_strategy parameter.
+The split_strategy parameter currently supports random or ordered temporal
+splits. It does not enforce held-out participants/sessions or a gap between
+overlapping train and test windows.
 """
 
 from __future__ import annotations

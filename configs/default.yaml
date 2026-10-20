@@ -172,14 +172,14 @@ engagement:
     min_confidence: 0.20   # below this → UNRELIABLE regardless of score
 
   # Temporal smoothing — EMA and state debounce.
-  # alpha=0.10 at 25 FPS gives a ~0.4 s half-life (absorbs blink transients).
+  # alpha=0.10 gives a 6.58-frame half-life (~0.263 s at 25 processed FPS).
   # state_min_frames=5 prevents state-badge flicker on single-frame anomalies.
   smoothing:
     alpha:            0.10
     state_min_frames: 5
 
   # Confidence score parameters.
-  # min_history_s: seconds of face presence before confidence reaches 1.0.
+  # min_history_s: elapsed seconds since the first update for the warmup factor.
   # pose_error_max: reprojection error (px) that fully penalises confidence.
   confidence:
     min_history_s:  10.0

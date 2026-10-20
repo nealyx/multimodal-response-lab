@@ -29,9 +29,10 @@ import math
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from src.signals.head_pose import PoseMeasurement
+if TYPE_CHECKING:
+    from src.signals.head_pose import PoseMeasurement
 
 
 # ── Enums and data structures ─────────────────────────────────────────────────

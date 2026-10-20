@@ -10,10 +10,12 @@ deferred to analytics.py, which operates on the completed log.
 This separation means:
   - The recorder can be lightweight (no computation on the hot path).
   - Analytics can be re-run offline with different parameters.
-  - Events can be synced across machines if the same monotonic epoch is used.
+  - Relative intervals share the caller's clock within a session. Independent
+    processes or machines require explicit clock alignment.
 
-All timestamps use time.monotonic() — immune to NTP corrections and wall-clock
-adjustments that would corrupt latency measurements.
+Live callers supply monotonic application timestamps. Synthetic fixtures may
+use relative seconds and must label that provenance. Timestamps describe software
+events, not independently measured sensor capture or display-photon onset.
 """
 
 from __future__ import annotations

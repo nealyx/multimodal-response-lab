@@ -1,4 +1,6 @@
-"""Day 7: stimulus-response experiment framework."""
+"""Stimulus events and analytics, with rendering imported only when requested."""
+
+from importlib import import_module
 
 from src.stimulus.analytics import SessionAnalytics
 from src.stimulus.events import (
@@ -9,15 +11,27 @@ from src.stimulus.events import (
     TrialSummary,
 )
 from src.stimulus.exporter import SessionExporter
-from src.stimulus.presenter import ScheduledTrial, StimulusPresenter, build_schedule
 from src.stimulus.recorder import EventRecorder
-from src.stimulus.stimuli import (
-    ColorFlash,
-    MovingTarget,
-    ReactionPrompt,
-    ShapeStimulus,
-    Stimulus,
-)
+
+_RENDERING_EXPORTS = {
+    "ScheduledTrial": "presenter",
+    "StimulusPresenter": "presenter",
+    "build_schedule": "presenter",
+    "ColorFlash": "stimuli",
+    "MovingTarget": "stimuli",
+    "ReactionPrompt": "stimuli",
+    "ShapeStimulus": "stimuli",
+    "Stimulus": "stimuli",
+}
+
+
+def __getattr__(name):
+    """Keep the public rendering API without loading OpenCV for file analysis."""
+    if name not in _RENDERING_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.{_RENDERING_EXPORTS[name]}"), name)
+    globals()[name] = value
+    return value
 
 __all__ = [
     "BehavioralSample",

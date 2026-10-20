@@ -453,3 +453,18 @@ class TestRunCalibrationImports:
         assert "GazeDetector" in src
         assert "build_camera_matrix" in src
         assert "estimate_head_pose" in src
+
+
+def test_calibration_cli_default_uses_existing_configuration(monkeypatch):
+    """Do not silently fall back to empty defaults because of a misspelled path."""
+    import sys
+    from pathlib import Path
+    import run_calibration
+
+    captured = {}
+    monkeypatch.setattr(sys, "argv", ["run_calibration.py"])
+    monkeypatch.setattr(run_calibration, "run_webcam_calibration", lambda **kw: captured.update(kw))
+    run_calibration.main()
+    root = Path(__file__).resolve().parents[1]
+    assert captured["config_path"] == "configs/default.yaml"
+    assert (root / captured["config_path"]).is_file()

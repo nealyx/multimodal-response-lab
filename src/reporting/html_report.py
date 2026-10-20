@@ -78,6 +78,14 @@ def generate_html(
     stimulus_section   = _stimulus_section(metrics)
     trial_section      = _trial_table(trial_table or [])
     charts_section     = _charts_section(chart_pngs)
+    synthetic_notice = ""
+    if metrics.config_snapshot.get("provenance", {}).get("synthetic") is True:
+        synthetic_notice = """
+<div class="limitation">
+  <strong>SYNTHETIC DEMONSTRATION — no participant recording.</strong>
+  Signal inputs, events, and response latencies were scripted to exercise the
+  software. These figures do not measure a person's behavior or model accuracy.
+</div>"""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -95,6 +103,11 @@ def generate_html(
   {metrics.experiment_name} &nbsp;|&nbsp;
   Generated {metrics.generated_at[:19].replace("T", " ")} UTC
 </p>
+{synthetic_notice}
+<p class="subtitle">
+  State names such as focused, distracted, and fatigued are heuristic software
+  labels, not measured cognition, emotion, attention, or health.
+</p>
 
 <h2>Session Overview</h2>
 {overview_cards}
@@ -106,11 +119,12 @@ def generate_html(
 {trial_section}
 
 <div class="limitation">
-  <strong>Note:</strong> These are approximate behavioral orientation metrics
-  derived from a consumer webcam.  They measure where the user was looking and
-  their blink patterns — not cognitive engagement or comprehension.
-  Frame-rate granularity (~33 ms at 30 FPS) limits reaction-time precision.
-  Results should not be used for individual clinical or cognitive assessment.
+  <strong>Interpretation:</strong> These are signal summaries and orientation
+  proxies. Their validity depends on the input data and recording conditions.
+  Confidence is a separate heuristic quality gate, not a calibrated probability.
+  Recorded latency includes processing, polling, and display effects; it is not
+  a measurement of photon onset or cognitive reaction time.
+  These outputs do not support individual clinical or cognitive assessment.
 </div>
 
 <footer>
@@ -230,7 +244,8 @@ def _stimulus_section(m: SessionMetrics) -> str:
     return f"""
 <h2>Per-Stimulus Type Analysis</h2>
 <p style="font-size:0.8rem;color:#8B949E;margin-bottom:8px">
-  Score Δ = mean during − mean baseline.  Negative = stimulus was disruptive.
+  Score Δ = mean during − mean baseline. A negative value is a lower recorded
+  proxy score during the event; this comparison alone does not establish causation.
 </p>
 <table>
   {header}
