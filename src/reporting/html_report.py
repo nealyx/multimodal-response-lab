@@ -4,6 +4,7 @@ The generated HTML:
   - Is a single file (no external dependencies, CDN, or font requests).
   - Embeds all charts as base64 PNG data URIs.
   - Uses inline CSS only — no JavaScript, no frameworks.
+  - Displays saved labels as text, escaping them only at the HTML boundary.
   - Renders cleanly in any modern browser and on GitHub Pages.
 
 Design: string formatting rather than a template engine so the reporting
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import asdict
+from html import escape
 from typing import Any, Dict, List, Optional
 
 from src.reporting.metrics import SessionMetrics
@@ -98,16 +100,16 @@ def generate_html(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Session Report — {metrics.session_id}</title>
+  <title>Session Report — {escape(str(metrics.session_id))}</title>
   <style>{_CSS}</style>
 </head>
 <body>
 
 <h1>Behavioral Session Report</h1>
 <p class="subtitle">
-  Session <code>{metrics.session_id}</code> &nbsp;|&nbsp;
-  {metrics.experiment_name} &nbsp;|&nbsp;
-  Generated {metrics.generated_at[:19].replace("T", " ")} UTC
+  Session <code>{escape(str(metrics.session_id))}</code> &nbsp;|&nbsp;
+  {escape(str(metrics.experiment_name))} &nbsp;|&nbsp;
+  Generated {escape(metrics.generated_at[:19].replace("T", " "))} UTC
 </p>
 {synthetic_notice}
 {sample_notice}
@@ -258,7 +260,7 @@ def _stimulus_section(m: SessionMetrics) -> str:
             f"<td>{rec}</td>"
         ) if m.n_frames > 0 else "<td>Unavailable</td>" * 4
         rows.append(
-            f"<tr><td>{stype}</td><td>{st.n_trials}</td>"
+            f"<tr><td>{escape(str(stype))}</td><td>{st.n_trials}</td>"
             f"<td>{st.hit_rate*100:.0f}%</td><td>{lat}</td>"
             f"{scores}</tr>"
         )
@@ -291,8 +293,8 @@ def _trial_table(trials: List[Dict[str, Any]], samples_available: bool = True) -
             f"<td>{t.get('during_score', 0):.3f}</td><td>{rec}</td>"
         ) if samples_available else "<td>Unavailable</td>" * 3
         rows.append(
-            f"<tr><td>{t['trial_index']}</td><td>{t['stimulus_id']}</td>"
-            f"<td>{t['stimulus_type']}</td><td>{lat}</td><td>{rtype}</td>"
+            f"<tr><td>{escape(str(t['trial_index']))}</td><td>{escape(str(t['stimulus_id']))}</td>"
+            f"<td>{escape(str(t['stimulus_type']))}</td><td>{lat}</td><td>{escape(str(rtype))}</td>"
             f"<td>{hit_s}</td>{scores}</tr>"
         )
     return f"""
@@ -318,7 +320,7 @@ def _charts_section(chart_pngs: Dict[str, bytes]) -> str:
     items = []
     for name, png in chart_pngs.items():
         b64  = base64.b64encode(png).decode("ascii")
-        ttl  = titles.get(name, name.replace("_", " ").title())
+        ttl  = escape(titles.get(name, name.replace("_", " ").title()))
         items.append(f"""
   <div>
     <h3>{ttl}</h3>
