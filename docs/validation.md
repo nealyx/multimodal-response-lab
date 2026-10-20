@@ -33,6 +33,29 @@ The four warnings come from tests that intentionally provide duplicate feature v
 
 The small requirements files specify compatibility floors, not a frozen cross-platform environment. The package snapshot records this tested installation; it is not evidence that every permitted version or platform works.
 
+## Continuous checks
+
+The [Offline checks workflow](../.github/workflows/offline.yml) defines four jobs:
+the full suite and a minimal-dependency synthetic walkthrough, each on
+`ubuntu-latest` and `macos-latest` with Python 3.12. Every job creates a fresh
+virtual environment, installs the appropriate requirements file, checks
+dependency consistency, and records installed versions in its log.
+
+After installation, the workflow enables a Python socket guard through
+`PYTHONPATH`, including in child Python processes. The minimal walkthrough also
+rejects imports of OpenCV, MediaPipe, PyTorch, sounddevice, and pyaudio. It
+generates the synthetic session, reruns normal reporting and feature CLIs, then
+checks provenance, frame/window counts, prescribed latencies, and output files.
+The guard catches accidental Python network calls; it is not an operating-system
+network sandbox. Live capture and native-library network behavior are outside
+this check.
+
+The badge links to [actual hosted runs](https://github.com/nealyx/multimodal-response-lab/actions/workflows/offline.yml).
+The local CI rehearsal passed **543 tests with the same four warnings**, plus the
+minimal walkthrough and explicit checks that the network/import guard rejects
+access and propagates to child Python processes. Hosted results are recorded
+below only after their jobs finish.
+
 ## Reproduce
 
 From a fresh checkout, create separate environments as shown in the README:

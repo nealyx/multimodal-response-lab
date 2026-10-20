@@ -1,5 +1,7 @@
 # Multimodal Response Lab
 
+[![Offline checks](https://github.com/nealyx/multimodal-response-lab/actions/workflows/offline.yml/badge.svg)](https://github.com/nealyx/multimodal-response-lab/actions/workflows/offline.yml)
+
 A local research prototype for recording webcam-derived eye and head signals, running timed visual experiments, and exploring saved sessions. The useful engineering work is the complete path from signal processing to inspectable events, reusable analytics, and a report someone else can reproduce.
 
 **Start with the synthetic demo below.** It exercises the real scoring, export, loading, and reporting code without a camera, microphone, model download, or participant data.
@@ -131,6 +133,8 @@ python -m pytest tests/ -q
 ```
 
 The tests exercise synthetic landmarks/arrays, state machines, scoring, file round trips, reports, calibration, features, classifiers, and catalog management. They do not open a camera or display, download models, or validate a person's state. An end-to-end demo test blocks imports of the camera/ML hardware stack and network access, checks generated artifacts, and verifies overwrite protection.
+
+[Offline CI](.github/workflows/offline.yml) runs the full suite and a separate minimal-dependency demo/report/feature walkthrough on Linux and macOS with Python 3.12. Each job creates a fresh environment. After dependencies are installed, a Python socket guard rejects network calls; the minimal job also rejects optional vision/audio imports. This checks the offline software path, not live hardware or scientific accuracy.
 
 The [dated validation record](docs/validation.md) lists actual results and dependency versions. Historical 285-test and 25–30 FPS badges have been removed: test counts had drifted, and this repository does not provide a reproducible live-throughput benchmark. Successful software tests are not accuracy validation.
 
